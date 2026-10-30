@@ -1,0 +1,1277 @@
+{
+  "date": "2026-10-30",
+  "defaultParams": {
+    "detuningMHz": -25,
+    "powersMW": [
+      15,
+      15,
+      15,
+      15,
+      15,
+      15
+    ],
+    "waistMM": 6,
+    "mainCurrentA": 3,
+    "gradientPerAmp": 10,
+    "mainAxis": "y",
+    "biasCurrentA": [
+      0,
+      0,
+      0
+    ],
+    "biasPerAmp": [
+      1,
+      1,
+      1
+    ],
+    "gravity": true,
+    "recoil": true,
+    "sourceSpeed": 40,
+    "sourceSpread": 14.7,
+    "sourceRadiusMM": 1,
+    "sourceTempMK": 4,
+    "sourceYawDeg": 0,
+    "sourcePitchDeg": 0,
+    "sourceOffsetYMM": 0,
+    "sourceOffsetZMM": 0,
+    "sourceDistanceMM": 30,
+    "n": 192,
+    "durationMS": 20,
+    "seed": 399174,
+    "dtUS": 5
+  },
+  "controls": "GATE.md",
+  "pilots": [
+    {
+      "n": 64,
+      "elapsedMS": 219.918209
+    },
+    {
+      "n": 128,
+      "elapsedMS": 443.85183300000006
+    }
+  ],
+  "projectedMS": 63914.66395200001,
+  "cases": [
+    {
+      "id": "old-example",
+      "params": {
+        "detuningMHz": -25,
+        "powersMW": [
+          15,
+          15,
+          15,
+          15,
+          15,
+          15
+        ],
+        "waistMM": 6,
+        "mainCurrentA": 3,
+        "gradientPerAmp": 10,
+        "mainAxis": "y",
+        "biasCurrentA": [
+          0,
+          0,
+          0
+        ],
+        "biasPerAmp": [
+          1,
+          1,
+          1
+        ],
+        "gravity": true,
+        "recoil": true,
+        "sourceSpeed": 20,
+        "sourceSpread": 4,
+        "sourceRadiusMM": 1,
+        "sourceTempMK": 4,
+        "sourceYawDeg": 0,
+        "sourcePitchDeg": 0,
+        "sourceOffsetYMM": 0,
+        "sourceOffsetZMM": 0,
+        "sourceDistanceMM": 30,
+        "n": 1024,
+        "durationMS": 20,
+        "seed": 399174,
+        "dtUS": 5
+      },
+      "n": 4096,
+      "retained": 2070,
+      "fraction": 0.50537109375,
+      "wilson95": [
+        0.490061900067544,
+        0.5206702222454628
+      ],
+      "seedFractionRange": [
+        0.4765625,
+        0.5322265625
+      ],
+      "initialMeanMS": 20.003420393707746,
+      "initialStdMS": 4.036120969118207,
+      "retainedInitialMeanMS": 19.940670642534506,
+      "retainedFinalMeanSpeedMS": 0.4186845977563607,
+      "histogram": [
+        {
+          "lowerMS": 0,
+          "upperMS": 10,
+          "n": 17,
+          "retained": 10
+        },
+        {
+          "lowerMS": 10,
+          "upperMS": 20,
+          "n": 2040,
+          "retained": 1050
+        },
+        {
+          "lowerMS": 20,
+          "upperMS": 30,
+          "n": 2012,
+          "retained": 1000
+        },
+        {
+          "lowerMS": 30,
+          "upperMS": 40,
+          "n": 27,
+          "retained": 10
+        },
+        {
+          "lowerMS": 40,
+          "upperMS": 50,
+          "n": 0,
+          "retained": 0
+        },
+        {
+          "lowerMS": 50,
+          "upperMS": 60,
+          "n": 0,
+          "retained": 0
+        },
+        {
+          "lowerMS": 60,
+          "upperMS": 70,
+          "n": 0,
+          "retained": 0
+        },
+        {
+          "lowerMS": 70,
+          "upperMS": 80,
+          "n": 0,
+          "retained": 0
+        },
+        {
+          "lowerMS": 80,
+          "upperMS": 90,
+          "n": 0,
+          "retained": 0
+        },
+        {
+          "lowerMS": 90,
+          "upperMS": 100,
+          "n": 0,
+          "retained": 0
+        },
+        {
+          "lowerMS": 100,
+          "upperMS": 110,
+          "n": 0,
+          "retained": 0
+        },
+        {
+          "lowerMS": 110,
+          "upperMS": 120,
+          "n": 0,
+          "retained": 0
+        }
+      ],
+      "rows": [
+        {
+          "seed": 399174,
+          "retained": 527,
+          "retainedFraction": 0.5146484375,
+          "centroidMM": [
+            -0.0040186642374973654,
+            -0.004144013041566938,
+            -0.00829368829976464
+          ],
+          "rmsMM": [
+            0.07853459360760824,
+            0.07747827902144895,
+            0.1767278447335142
+          ],
+          "meanSpeed": 0.4209037605905357,
+          "allMeanSpeed": 0.4656651283909815,
+          "validCount": 1022,
+          "initialLongitudinal": {
+            "n": 1024,
+            "meanMS": 19.95679511712299,
+            "stdMS": 4.075117479218055
+          },
+          "retainedInitialLongitudinal": {
+            "n": 527,
+            "meanMS": 20.04685066707574,
+            "stdMS": 3.888319996102559
+          },
+          "zeroMM": [
+            0,
+            0,
+            0
+          ],
+          "criterion": {
+            "radiusMM": 3,
+            "speedMS": 1,
+            "holdMS": 5,
+            "center": "optical-origin"
+          },
+          "elapsedMS": 6284.156708
+        },
+        {
+          "seed": 399175,
+          "retained": 545,
+          "retainedFraction": 0.5322265625,
+          "centroidMM": [
+            -0.002683983901710594,
+            0.00502760920772036,
+            0.0058533706402784215
+          ],
+          "rmsMM": [
+            0.07897427367259705,
+            0.07661255945927667,
+            0.17309341313823653
+          ],
+          "meanSpeed": 0.4239394363557566,
+          "allMeanSpeed": 0.4675207296915137,
+          "validCount": 1021,
+          "initialLongitudinal": {
+            "n": 1024,
+            "meanMS": 19.955679145926027,
+            "stdMS": 3.898335123182748
+          },
+          "retainedInitialLongitudinal": {
+            "n": 545,
+            "meanMS": 19.8725327634423,
+            "stdMS": 3.8030219617047085
+          },
+          "zeroMM": [
+            0,
+            0,
+            0
+          ],
+          "criterion": {
+            "radiusMM": 3,
+            "speedMS": 1,
+            "holdMS": 5,
+            "center": "optical-origin"
+          },
+          "elapsedMS": 6334.255083999999
+        },
+        {
+          "seed": 399176,
+          "retained": 510,
+          "retainedFraction": 0.498046875,
+          "centroidMM": [
+            -0.0008160468322601701,
+            0.0010671824321776802,
+            0.009858470306305376
+          ],
+          "rmsMM": [
+            0.08030352225023997,
+            0.07693398059810796,
+            0.18243538963732328
+          ],
+          "meanSpeed": 0.4192849424030161,
+          "allMeanSpeed": 0.4968910769739531,
+          "validCount": 1017,
+          "initialLongitudinal": {
+            "n": 1024,
+            "meanMS": 20.01070840245636,
+            "stdMS": 4.146115450291021
+          },
+          "retainedInitialLongitudinal": {
+            "n": 510,
+            "meanMS": 19.881664921619397,
+            "stdMS": 4.208989354651781
+          },
+          "zeroMM": [
+            0,
+            0,
+            0
+          ],
+          "criterion": {
+            "radiusMM": 3,
+            "speedMS": 1,
+            "holdMS": 5,
+            "center": "optical-origin"
+          },
+          "elapsedMS": 6751.770291999999
+        },
+        {
+          "seed": 399177,
+          "retained": 488,
+          "retainedFraction": 0.4765625,
+          "centroidMM": [
+            -0.0003903225531307938,
+            -0.0002491214696972654,
+            -0.011199483571479481
+          ],
+          "rmsMM": [
+            0.08156209012056478,
+            0.0769258234285356,
+            0.17717725779374288
+          ],
+          "meanSpeed": 0.4097920534529278,
+          "allMeanSpeed": 0.4474903359763576,
+          "validCount": 1019,
+          "initialLongitudinal": {
+            "n": 1024,
+            "meanMS": 20.090498909325778,
+            "stdMS": 4.019344281608289
+          },
+          "retainedInitialLongitudinal": {
+            "n": 488,
+            "meanMS": 19.963767340974435,
+            "stdMS": 3.903416806239974
+          },
+          "zeroMM": [
+            0,
+            0,
+            0
+          ],
+          "criterion": {
+            "radiusMM": 3,
+            "speedMS": 1,
+            "holdMS": 5,
+            "center": "optical-origin"
+          },
+          "elapsedMS": 6686.135875
+        }
+      ]
+    },
+    {
+      "id": "aosense-reference",
+      "params": {
+        "detuningMHz": -25,
+        "powersMW": [
+          15,
+          15,
+          15,
+          15,
+          15,
+          15
+        ],
+        "waistMM": 6,
+        "mainCurrentA": 3,
+        "gradientPerAmp": 10,
+        "mainAxis": "y",
+        "biasCurrentA": [
+          0,
+          0,
+          0
+        ],
+        "biasPerAmp": [
+          1,
+          1,
+          1
+        ],
+        "gravity": true,
+        "recoil": true,
+        "sourceSpeed": 40,
+        "sourceSpread": 14.7,
+        "sourceRadiusMM": 1,
+        "sourceTempMK": 4,
+        "sourceYawDeg": 0,
+        "sourcePitchDeg": 0,
+        "sourceOffsetYMM": 0,
+        "sourceOffsetZMM": 0,
+        "sourceDistanceMM": 30,
+        "n": 1024,
+        "durationMS": 20,
+        "seed": 399174,
+        "dtUS": 5
+      },
+      "n": 4096,
+      "retained": 833,
+      "fraction": 0.203369140625,
+      "wilson95": [
+        0.1913232349718655,
+        0.2159709191052578
+      ],
+      "seedFractionRange": [
+        0.1962890625,
+        0.2109375
+      ],
+      "initialMeanMS": 39.915617908367864,
+      "initialStdMS": 14.636665022038436,
+      "retainedInitialMeanMS": 26.025310793471682,
+      "retainedFinalMeanSpeedMS": 0.4148405838314747,
+      "histogram": [
+        {
+          "lowerMS": 0,
+          "upperMS": 10,
+          "n": 74,
+          "retained": 40
+        },
+        {
+          "lowerMS": 10,
+          "upperMS": 20,
+          "n": 283,
+          "retained": 139
+        },
+        {
+          "lowerMS": 20,
+          "upperMS": 30,
+          "n": 691,
+          "retained": 333
+        },
+        {
+          "lowerMS": 30,
+          "upperMS": 40,
+          "n": 994,
+          "retained": 321
+        },
+        {
+          "lowerMS": 40,
+          "upperMS": 50,
+          "n": 1034,
+          "retained": 0
+        },
+        {
+          "lowerMS": 50,
+          "upperMS": 60,
+          "n": 679,
+          "retained": 0
+        },
+        {
+          "lowerMS": 60,
+          "upperMS": 70,
+          "n": 253,
+          "retained": 0
+        },
+        {
+          "lowerMS": 70,
+          "upperMS": 80,
+          "n": 74,
+          "retained": 0
+        },
+        {
+          "lowerMS": 80,
+          "upperMS": 90,
+          "n": 13,
+          "retained": 0
+        },
+        {
+          "lowerMS": 90,
+          "upperMS": 100,
+          "n": 1,
+          "retained": 0
+        },
+        {
+          "lowerMS": 100,
+          "upperMS": 110,
+          "n": 0,
+          "retained": 0
+        },
+        {
+          "lowerMS": 110,
+          "upperMS": 120,
+          "n": 0,
+          "retained": 0
+        }
+      ],
+      "rows": [
+        {
+          "seed": 399174,
+          "retained": 208,
+          "retainedFraction": 0.203125,
+          "centroidMM": [
+            -0.002354211430191144,
+            -0.009037598650726137,
+            -0.011164705494931735
+          ],
+          "rmsMM": [
+            0.07945163480543047,
+            0.080539018913644,
+            0.18176452277564242
+          ],
+          "meanSpeed": 0.4267979482469038,
+          "allMeanSpeed": 0.4882262543594691,
+          "validCount": 424,
+          "initialLongitudinal": {
+            "n": 1024,
+            "meanMS": 39.37576035843011,
+            "stdMS": 14.660906987084582
+          },
+          "retainedInitialLongitudinal": {
+            "n": 208,
+            "meanMS": 25.35061219955219,
+            "stdMS": 8.951980739776735
+          },
+          "zeroMM": [
+            0,
+            0,
+            0
+          ],
+          "criterion": {
+            "radiusMM": 3,
+            "speedMS": 1,
+            "holdMS": 5,
+            "center": "optical-origin"
+          },
+          "elapsedMS": 3892.673084000002
+        },
+        {
+          "seed": 399175,
+          "retained": 216,
+          "retainedFraction": 0.2109375,
+          "centroidMM": [
+            -0.003369463030551887,
+            0.0028391918221838458,
+            0.02360809088055071
+          ],
+          "rmsMM": [
+            0.08057543541611083,
+            0.07662113088146014,
+            0.17383796143268276
+          ],
+          "meanSpeed": 0.40870561125979116,
+          "allMeanSpeed": 0.4995626362487181,
+          "validCount": 417,
+          "initialLongitudinal": {
+            "n": 1024,
+            "meanMS": 39.8371208612781,
+            "stdMS": 14.326381577696598
+          },
+          "retainedInitialLongitudinal": {
+            "n": 216,
+            "meanMS": 26.31314258960375,
+            "stdMS": 7.6357634443350095
+          },
+          "zeroMM": [
+            0,
+            0,
+            0
+          ],
+          "criterion": {
+            "radiusMM": 3,
+            "speedMS": 1,
+            "holdMS": 5,
+            "center": "optical-origin"
+          },
+          "elapsedMS": 4241.155541000004
+        },
+        {
+          "seed": 399176,
+          "retained": 208,
+          "retainedFraction": 0.203125,
+          "centroidMM": [
+            -0.009276032380516434,
+            -0.003156669585945739,
+            0.010764364577444258
+          ],
+          "rmsMM": [
+            0.07666202258702866,
+            0.07321745718128199,
+            0.16573254842657492
+          ],
+          "meanSpeed": 0.41665716753816867,
+          "allMeanSpeed": 0.5006770702947971,
+          "validCount": 407,
+          "initialLongitudinal": {
+            "n": 1024,
+            "meanMS": 40.23136481911129,
+            "stdMS": 14.946857258661423
+          },
+          "retainedInitialLongitudinal": {
+            "n": 208,
+            "meanMS": 25.981129032131182,
+            "stdMS": 7.993053760679058
+          },
+          "zeroMM": [
+            0,
+            0,
+            0
+          ],
+          "criterion": {
+            "radiusMM": 3,
+            "speedMS": 1,
+            "holdMS": 5,
+            "center": "optical-origin"
+          },
+          "elapsedMS": 3756.7416660000017
+        },
+        {
+          "seed": 399177,
+          "retained": 201,
+          "retainedFraction": 0.1962890625,
+          "centroidMM": [
+            -0.0013530631578949068,
+            -0.0007888684403672921,
+            -0.014717315742341265
+          ],
+          "rmsMM": [
+            0.08334044727062916,
+            0.07570209103184078,
+            0.183881520220069
+          ],
+          "meanSpeed": 0.40717975231944525,
+          "allMeanSpeed": 0.5153311148933157,
+          "validCount": 411,
+          "initialLongitudinal": {
+            "n": 1024,
+            "meanMS": 40.21822559465224,
+            "stdMS": 14.589140882205427
+          },
+          "retainedInitialLongitudinal": {
+            "n": 201,
+            "meanMS": 26.459915002076457,
+            "stdMS": 7.99199368917545
+          },
+          "zeroMM": [
+            0,
+            0,
+            0
+          ],
+          "criterion": {
+            "radiusMM": 3,
+            "speedMS": 1,
+            "holdMS": 5,
+            "center": "optical-origin"
+          },
+          "elapsedMS": 3502.4729579999985
+        }
+      ]
+    },
+    {
+      "id": "aosense-half-step",
+      "params": {
+        "detuningMHz": -25,
+        "powersMW": [
+          15,
+          15,
+          15,
+          15,
+          15,
+          15
+        ],
+        "waistMM": 6,
+        "mainCurrentA": 3,
+        "gradientPerAmp": 10,
+        "mainAxis": "y",
+        "biasCurrentA": [
+          0,
+          0,
+          0
+        ],
+        "biasPerAmp": [
+          1,
+          1,
+          1
+        ],
+        "gravity": true,
+        "recoil": true,
+        "sourceSpeed": 40,
+        "sourceSpread": 14.7,
+        "sourceRadiusMM": 1,
+        "sourceTempMK": 4,
+        "sourceYawDeg": 0,
+        "sourcePitchDeg": 0,
+        "sourceOffsetYMM": 0,
+        "sourceOffsetZMM": 0,
+        "sourceDistanceMM": 30,
+        "n": 1024,
+        "durationMS": 20,
+        "seed": 399174,
+        "dtUS": 2.5
+      },
+      "n": 4096,
+      "retained": 847,
+      "fraction": 0.206787109375,
+      "wilson95": [
+        0.19466166891459338,
+        0.2194620175435343
+      ],
+      "seedFractionRange": [
+        0.1982421875,
+        0.2177734375
+      ],
+      "initialMeanMS": 39.915617908367864,
+      "initialStdMS": 14.636665022038436,
+      "retainedInitialMeanMS": 26.091401341354022,
+      "retainedFinalMeanSpeedMS": 0.4234004808411765,
+      "histogram": [
+        {
+          "lowerMS": 0,
+          "upperMS": 10,
+          "n": 74,
+          "retained": 33
+        },
+        {
+          "lowerMS": 10,
+          "upperMS": 20,
+          "n": 283,
+          "retained": 155
+        },
+        {
+          "lowerMS": 20,
+          "upperMS": 30,
+          "n": 691,
+          "retained": 337
+        },
+        {
+          "lowerMS": 30,
+          "upperMS": 40,
+          "n": 994,
+          "retained": 322
+        },
+        {
+          "lowerMS": 40,
+          "upperMS": 50,
+          "n": 1034,
+          "retained": 0
+        },
+        {
+          "lowerMS": 50,
+          "upperMS": 60,
+          "n": 679,
+          "retained": 0
+        },
+        {
+          "lowerMS": 60,
+          "upperMS": 70,
+          "n": 253,
+          "retained": 0
+        },
+        {
+          "lowerMS": 70,
+          "upperMS": 80,
+          "n": 74,
+          "retained": 0
+        },
+        {
+          "lowerMS": 80,
+          "upperMS": 90,
+          "n": 13,
+          "retained": 0
+        },
+        {
+          "lowerMS": 90,
+          "upperMS": 100,
+          "n": 1,
+          "retained": 0
+        },
+        {
+          "lowerMS": 100,
+          "upperMS": 110,
+          "n": 0,
+          "retained": 0
+        },
+        {
+          "lowerMS": 110,
+          "upperMS": 120,
+          "n": 0,
+          "retained": 0
+        }
+      ],
+      "rows": [
+        {
+          "seed": 399174,
+          "retained": 203,
+          "retainedFraction": 0.1982421875,
+          "centroidMM": [
+            0.00345561378857659,
+            -0.00027909938661638083,
+            0.012115145386343328
+          ],
+          "rmsMM": [
+            0.07840120727572604,
+            0.08004596724781651,
+            0.18423029912559505
+          ],
+          "meanSpeed": 0.41703725745537945,
+          "allMeanSpeed": 0.49224718030416614,
+          "validCount": 427,
+          "initialLongitudinal": {
+            "n": 1024,
+            "meanMS": 39.37576035843011,
+            "stdMS": 14.660906987084582
+          },
+          "retainedInitialLongitudinal": {
+            "n": 203,
+            "meanMS": 26.142511342035053,
+            "stdMS": 7.549939050177134
+          },
+          "zeroMM": [
+            0,
+            0,
+            0
+          ],
+          "criterion": {
+            "radiusMM": 3,
+            "speedMS": 1,
+            "holdMS": 5,
+            "center": "optical-origin"
+          },
+          "elapsedMS": 7028.709167000001
+        },
+        {
+          "seed": 399175,
+          "retained": 223,
+          "retainedFraction": 0.2177734375,
+          "centroidMM": [
+            -0.001767405876981316,
+            0.0033168627676257545,
+            0.010214288133374133
+          ],
+          "rmsMM": [
+            0.07518192889085616,
+            0.07642111994630549,
+            0.172021589611629
+          ],
+          "meanSpeed": 0.41102585766200994,
+          "allMeanSpeed": 0.47665439557224837,
+          "validCount": 414,
+          "initialLongitudinal": {
+            "n": 1024,
+            "meanMS": 39.8371208612781,
+            "stdMS": 14.326381577696598
+          },
+          "retainedInitialLongitudinal": {
+            "n": 223,
+            "meanMS": 26.216934774627457,
+            "stdMS": 7.78711374672419
+          },
+          "zeroMM": [
+            0,
+            0,
+            0
+          ],
+          "criterion": {
+            "radiusMM": 3,
+            "speedMS": 1,
+            "holdMS": 5,
+            "center": "optical-origin"
+          },
+          "elapsedMS": 7428.337958999997
+        },
+        {
+          "seed": 399176,
+          "retained": 213,
+          "retainedFraction": 0.2080078125,
+          "centroidMM": [
+            -0.002939298555245905,
+            0.004205425845345147,
+            -0.0033848352329673252
+          ],
+          "rmsMM": [
+            0.08144681767645608,
+            0.07555934881315807,
+            0.18899006675887528
+          ],
+          "meanSpeed": 0.4472098023686782,
+          "allMeanSpeed": 0.5102266534836228,
+          "validCount": 405,
+          "initialLongitudinal": {
+            "n": 1024,
+            "meanMS": 40.23136481911129,
+            "stdMS": 14.946857258661423
+          },
+          "retainedInitialLongitudinal": {
+            "n": 213,
+            "meanMS": 25.80092378950344,
+            "stdMS": 8.26841969943144
+          },
+          "zeroMM": [
+            0,
+            0,
+            0
+          ],
+          "criterion": {
+            "radiusMM": 3,
+            "speedMS": 1,
+            "holdMS": 5,
+            "center": "optical-origin"
+          },
+          "elapsedMS": 7265.9544590000005
+        },
+        {
+          "seed": 399177,
+          "retained": 208,
+          "retainedFraction": 0.203125,
+          "centroidMM": [
+            -0.002244491761114062,
+            -0.0027392747996788564,
+            -0.007709990250716474
+          ],
+          "rmsMM": [
+            0.0749581883781375,
+            0.08291598359621882,
+            0.180591534411619
+          ],
+          "meanSpeed": 0.4184961050282585,
+          "allMeanSpeed": 0.529150296305974,
+          "validCount": 410,
+          "initialLongitudinal": {
+            "n": 1024,
+            "meanMS": 40.21822559465224,
+            "stdMS": 14.589140882205427
+          },
+          "retainedInitialLongitudinal": {
+            "n": 208,
+            "meanMS": 26.204393806671117,
+            "stdMS": 8.227229005062611
+          },
+          "zeroMM": [
+            0,
+            0,
+            0
+          ],
+          "criterion": {
+            "radiusMM": 3,
+            "speedMS": 1,
+            "holdMS": 5,
+            "center": "optical-origin"
+          },
+          "elapsedMS": 7273.638416000009
+        }
+      ]
+    },
+    {
+      "id": "reversed-current",
+      "params": {
+        "detuningMHz": -25,
+        "powersMW": [
+          15,
+          15,
+          15,
+          15,
+          15,
+          15
+        ],
+        "waistMM": 6,
+        "mainCurrentA": -3,
+        "gradientPerAmp": 10,
+        "mainAxis": "y",
+        "biasCurrentA": [
+          0,
+          0,
+          0
+        ],
+        "biasPerAmp": [
+          1,
+          1,
+          1
+        ],
+        "gravity": true,
+        "recoil": true,
+        "sourceSpeed": 40,
+        "sourceSpread": 14.7,
+        "sourceRadiusMM": 1,
+        "sourceTempMK": 4,
+        "sourceYawDeg": 0,
+        "sourcePitchDeg": 0,
+        "sourceOffsetYMM": 0,
+        "sourceOffsetZMM": 0,
+        "sourceDistanceMM": 30,
+        "n": 1024,
+        "durationMS": 20,
+        "seed": 399174,
+        "dtUS": 5
+      },
+      "n": 1024,
+      "retained": 0,
+      "fraction": 0,
+      "wilson95": [
+        0,
+        0.0037374040400176777
+      ],
+      "seedFractionRange": [
+        0,
+        0
+      ],
+      "initialMeanMS": 39.37576035843011,
+      "initialStdMS": 14.660906987084552,
+      "retainedInitialMeanMS": null,
+      "retainedFinalMeanSpeedMS": null,
+      "histogram": [
+        {
+          "lowerMS": 0,
+          "upperMS": 10,
+          "n": 20,
+          "retained": 0
+        },
+        {
+          "lowerMS": 10,
+          "upperMS": 20,
+          "n": 76,
+          "retained": 0
+        },
+        {
+          "lowerMS": 20,
+          "upperMS": 30,
+          "n": 180,
+          "retained": 0
+        },
+        {
+          "lowerMS": 30,
+          "upperMS": 40,
+          "n": 248,
+          "retained": 0
+        },
+        {
+          "lowerMS": 40,
+          "upperMS": 50,
+          "n": 250,
+          "retained": 0
+        },
+        {
+          "lowerMS": 50,
+          "upperMS": 60,
+          "n": 174,
+          "retained": 0
+        },
+        {
+          "lowerMS": 60,
+          "upperMS": 70,
+          "n": 61,
+          "retained": 0
+        },
+        {
+          "lowerMS": 70,
+          "upperMS": 80,
+          "n": 12,
+          "retained": 0
+        },
+        {
+          "lowerMS": 80,
+          "upperMS": 90,
+          "n": 2,
+          "retained": 0
+        },
+        {
+          "lowerMS": 90,
+          "upperMS": 100,
+          "n": 1,
+          "retained": 0
+        },
+        {
+          "lowerMS": 100,
+          "upperMS": 110,
+          "n": 0,
+          "retained": 0
+        },
+        {
+          "lowerMS": 110,
+          "upperMS": 120,
+          "n": 0,
+          "retained": 0
+        }
+      ],
+      "rows": [
+        {
+          "seed": 399174,
+          "retained": 0,
+          "retainedFraction": 0,
+          "centroidMM": null,
+          "rmsMM": null,
+          "meanSpeed": null,
+          "allMeanSpeed": 5.734252605056386,
+          "validCount": 8,
+          "initialLongitudinal": {
+            "n": 1024,
+            "meanMS": 39.37576035843011,
+            "stdMS": 14.660906987084582
+          },
+          "retainedInitialLongitudinal": {
+            "n": 0,
+            "meanMS": null,
+            "stdMS": null
+          },
+          "zeroMM": [
+            0,
+            0,
+            0
+          ],
+          "criterion": {
+            "radiusMM": 3,
+            "speedMS": 1,
+            "holdMS": 5,
+            "center": "optical-origin"
+          },
+          "elapsedMS": 2402.8665420000034
+        }
+      ]
+    },
+    {
+      "id": "no-light",
+      "params": {
+        "detuningMHz": -25,
+        "powersMW": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "waistMM": 6,
+        "mainCurrentA": 3,
+        "gradientPerAmp": 10,
+        "mainAxis": "y",
+        "biasCurrentA": [
+          0,
+          0,
+          0
+        ],
+        "biasPerAmp": [
+          1,
+          1,
+          1
+        ],
+        "gravity": true,
+        "recoil": true,
+        "sourceSpeed": 40,
+        "sourceSpread": 14.7,
+        "sourceRadiusMM": 1,
+        "sourceTempMK": 4,
+        "sourceYawDeg": 0,
+        "sourcePitchDeg": 0,
+        "sourceOffsetYMM": 0,
+        "sourceOffsetZMM": 0,
+        "sourceDistanceMM": 30,
+        "n": 1024,
+        "durationMS": 20,
+        "seed": 399174,
+        "dtUS": 5
+      },
+      "n": 1024,
+      "retained": 0,
+      "fraction": 0,
+      "wilson95": [
+        0,
+        0.0037374040400176777
+      ],
+      "seedFractionRange": [
+        0,
+        0
+      ],
+      "initialMeanMS": 39.37576035843011,
+      "initialStdMS": 14.660906987084552,
+      "retainedInitialMeanMS": null,
+      "retainedFinalMeanSpeedMS": null,
+      "histogram": [
+        {
+          "lowerMS": 0,
+          "upperMS": 10,
+          "n": 20,
+          "retained": 0
+        },
+        {
+          "lowerMS": 10,
+          "upperMS": 20,
+          "n": 76,
+          "retained": 0
+        },
+        {
+          "lowerMS": 20,
+          "upperMS": 30,
+          "n": 180,
+          "retained": 0
+        },
+        {
+          "lowerMS": 30,
+          "upperMS": 40,
+          "n": 248,
+          "retained": 0
+        },
+        {
+          "lowerMS": 40,
+          "upperMS": 50,
+          "n": 250,
+          "retained": 0
+        },
+        {
+          "lowerMS": 50,
+          "upperMS": 60,
+          "n": 174,
+          "retained": 0
+        },
+        {
+          "lowerMS": 60,
+          "upperMS": 70,
+          "n": 61,
+          "retained": 0
+        },
+        {
+          "lowerMS": 70,
+          "upperMS": 80,
+          "n": 12,
+          "retained": 0
+        },
+        {
+          "lowerMS": 80,
+          "upperMS": 90,
+          "n": 2,
+          "retained": 0
+        },
+        {
+          "lowerMS": 90,
+          "upperMS": 100,
+          "n": 1,
+          "retained": 0
+        },
+        {
+          "lowerMS": 100,
+          "upperMS": 110,
+          "n": 0,
+          "retained": 0
+        },
+        {
+          "lowerMS": 110,
+          "upperMS": 120,
+          "n": 0,
+          "retained": 0
+        }
+      ],
+      "rows": [
+        {
+          "seed": 399174,
+          "retained": 0,
+          "retainedFraction": 0,
+          "centroidMM": null,
+          "rmsMM": null,
+          "meanSpeed": null,
+          "allMeanSpeed": 6.096967811202198,
+          "validCount": 17,
+          "initialLongitudinal": {
+            "n": 1024,
+            "meanMS": 39.37576035843011,
+            "stdMS": 14.660906987084582
+          },
+          "retainedInitialLongitudinal": {
+            "n": 0,
+            "meanMS": null,
+            "stdMS": null
+          },
+          "zeroMM": [
+            0,
+            0,
+            0
+          ],
+          "criterion": {
+            "radiusMM": 3,
+            "speedMS": 1,
+            "holdMS": 5,
+            "center": "optical-origin"
+          },
+          "elapsedMS": 1953.3897089999955
+        }
+      ]
+    }
+  ],
+  "stepCheck": {
+    "difference": 0.00341796875,
+    "tolerance": 0.03,
+    "passed": true
+  },
+  "noLightCheck": true
+}

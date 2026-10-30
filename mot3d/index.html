@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Yb 399 nm 蓝 3D MOT 快速调参：六束光、主线圈、三轴补偿磁场和冷原子束注入。">
+  <title>Yb · 399 nm 蓝 MOT 工作台</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='15' fill='%23090c12'/%3E%3Cpath d='M9 32h46' stroke='%235ce1e6' stroke-width='3'/%3E%3Ccircle cx='32' cy='32' r='9' fill='%23ffb657'/%3E%3Cpath d='M16 18l8 8m24-8l-8 8M16 46l8-8m24 8l-8-8' stroke='%23c7f36b' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#workspace">跳到工作台</a>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark" aria-hidden="true">Yb</span><div><h1>399 nm 蓝 MOT</h1><p>六束光 <span>·</span> 冷束注入 <span>·</span> 三维轨迹</p></div></div>
+    <div class="header-actions"><button id="save-settings" class="button quiet">保存设置</button><button id="restore-settings" class="button quiet" disabled>恢复保存</button><button id="reset-settings" class="button">复位</button></div>
+  </header>
+
+  <main id="workspace">
+    <nav class="mobile-jumps" aria-label="工作台区域"><a href="#scene-section">看云团</a><a href="#controls">调参数</a></nav>
+    <div class="workspace-grid">
+      <aside id="controls" class="controls" aria-label="MOT 参数">
+        <section class="control-section">
+          <div class="section-heading"><h2><span class="section-number">01</span> 光场</h2><span class="mini-badge cyan">¹⁷⁴Yb · 399 nm</span></div>
+          <div id="light-controls" class="control-stack"></div>
+          <div class="power-heading"><span>单束功率 <span class="unit">mW</span></span><label class="check-label"><input id="link-powers" type="checkbox" checked><span>联动修改</span></label></div>
+          <div class="power-grid" id="power-controls" aria-label="六束光单独功率"></div>
+          <div class="light-reference" aria-label="功率密度与饱和光强关系">
+            <div class="inline-readout"><span>饱和光强 Isat</span><output id="saturation-reference">— mW/cm²</output></div>
+            <p class="intensity-formula"><span>I₀ = 2P / (πw²)</span><span>s₀ = I₀ / Isat</span></p>
+            <p class="intensity-note">I₀ 为中心峰值功率密度，w 为 1/e² 光强半径；s₀ 未含失谐项。</p>
+          </div>
+          <p class="geometry-hint">V1 / V2 在竖直平面夹 120°；H 沿水平 Y 轴。</p>
+          <div class="polarization-readout">
+            <div><span>固定光子 helicity</span><a href="#polarization-basis" class="basis-link">能级依据 ↗</a></div>
+            <p>H±：h = +1 <span>／</span> V1±、V2±：h = −1</p>
+            <small>h 以每束光自己的传播方向 k 为轴。</small>
+          </div>
+          <div class="inline-readout"><span>六束总功率</span><output id="total-power">—</output></div>
+          <div class="inline-readout"><span>光束交点 Σs₀</span><output id="total-saturation">—</output></div>
+        </section>
+
+        <section class="control-section">
+          <div class="section-heading"><h2><span class="section-number">02</span> 线圈</h2><a class="calibration-link" href="#calibration-details">示例系数 · 待标定</a></div>
+          <label class="axis-select" for="main-axis"><span>主线圈轴</span><select id="main-axis"><option value="y">Y · 实际水平 H 轴</option><option value="z">Z · 竖直轴对照</option></select></label>
+          <p class="group-help axis-help">实际主轴沿 H；Z 用于构型对照，光偏振保持不变。</p>
+          <div id="main-coil-controls" class="control-stack"></div>
+          <div class="inline-readout"><span id="gradient-label">主轴梯度 ∂By/∂y</span><output id="gradient-output">—</output></div>
+          <div class="coil-direction-readout">
+            <div><span>主电流方向约定</span><output id="main-current-direction">—</output></div>
+            <p id="main-current-observer">观察者位于 +Y，朝原点看两圈。</p>
+          </div>
+          <div class="subsection-heading">三轴偏置电流 <span class="unit">A</span></div>
+          <div id="bias-controls" class="control-stack compact"></div>
+          <div class="field-readout"><span>偏置磁场 <span class="unit">G</span></span><output id="bias-output">—</output></div>
+          <details class="bias-direction-details"><summary>偏置电流方向约定</summary><dl id="bias-current-directions"><div><dt>X</dt><dd>—</dd></div><div><dt>Y</dt><dd>—</dd></div><div><dt>Z</dt><dd>—</dd></div></dl><p>分别从对应 +轴朝原点看；每对线圈采用同一观察方向。</p></details>
+        </section>
+
+        <section class="switch-section" aria-label="力模型开关">
+          <label class="check-label"><input id="gravity-toggle" type="checkbox" checked><span>重力 −Z</span></label>
+          <label class="check-label"><input id="recoil-toggle" type="checkbox" checked><span>随机反冲</span></label>
+        </section>
+
+        <details class="parameter-details" id="source-details">
+          <summary><span>冷束初态</span><span id="source-mini" class="summary-value">μ 40 · σ 14.7 m/s</span></summary>
+          <p class="group-help">在 t = 0 沿 +X 注入一批原子。偏航绕 Z，俯仰指向 ±Z。</p>
+          <div id="source-controls" class="number-grid"></div>
+          <p class="source-reference">μ、σ 为高斯分布参数，仅抽取正向速度。<a href="https://edoc.ub.uni-muenchen.de/34662/1/Hoehn_Tim.pdf#page=85" target="_blank" rel="noopener">40 / 14.7 m/s 的文献出处 ↗</a></p>
+          <div class="input-sample-readout"><span>本批入口实际抽样</span><output id="input-sample-output">计算中</output></div>
+        </details>
+        <details class="parameter-details" id="calibration-details">
+          <summary><span>线圈标定系数</span><span class="summary-value amber">待标定</span></summary>
+          <p class="group-help">填入实测系数后，电流与磁场读数按新系数换算。</p>
+          <div id="calibration-controls" class="number-grid"></div>
+        </details>
+        <details class="parameter-details" id="sampling-details">
+          <summary><span>抽样与积分</span><span id="sample-mini" class="summary-value">192 原子</span></summary>
+          <div class="number-grid sampling-grid">
+            <label class="number-control" for="sample-count"><span>原子样本数</span><select id="sample-count"><option value="96">96</option><option value="192" selected>192</option><option value="384">384</option><option value="768">768</option></select></label>
+          </div>
+          <div id="sampling-controls" class="number-grid"></div>
+          <p class="group-help">调参保持同一随机种子，便于比较光场和磁场的影响。</p>
+          <button id="reseed" class="button full-width">重新抽样</button>
+        </details>
+      </aside>
+
+      <section class="result-workspace" id="scene-section" aria-label="三维场景与计算结果">
+        <div class="scene-card">
+          <div class="mode-tabs" role="tablist" aria-label="显示物理量"><button id="mode-trajectories" class="mode-tab is-active" role="tab" data-mode="trajectories" aria-controls="scene-panel" aria-selected="true" tabindex="0">原子轨迹</button><button id="mode-field" class="mode-tab" role="tab" data-mode="field" aria-controls="scene-panel" aria-selected="false" tabindex="-1">磁场线</button><button id="mode-force" class="mode-tab" role="tab" data-mode="force" aria-controls="scene-panel" aria-selected="false" tabindex="-1">光力</button><button id="mode-density" class="mode-tab" role="tab" data-mode="density" aria-controls="scene-panel" aria-selected="false" tabindex="-1">云团密度</button></div>
+          <div class="scene-toolbar"><div class="scene-heading"><h2>三维 MOT</h2><span id="run-status" class="run-status" role="status" aria-live="polite">正在准备…</span></div><div class="view-buttons" role="group" aria-label="场景视角"><button data-view="iso" class="small-button is-active" aria-pressed="true">三维</button><button data-view="xy" class="small-button" aria-pressed="false">XY</button><button data-view="xz" class="small-button" aria-pressed="false">XZ</button><button data-view="yz" class="small-button" aria-pressed="false">YZ</button><button id="cloud-view" data-view="cloud" class="small-button" aria-pressed="false" title="放大终态留存云的中心" hidden disabled>云团放大</button></div></div>
+          <div class="mode-description"><span id="mode-description">同一批冷束原子在六束光与磁场中的运动。</span><label id="force-velocity-control" hidden>测试速度 <select id="force-velocity"><option value="static">v = 0</option><option value="source">冷束入射速度</option></select></label></div>
+          <div class="scene-container" id="scene-panel" role="tabpanel" aria-labelledby="mode-trajectories">
+            <div id="scene-viewport" class="scene-viewport" aria-label="六束光、线圈和原子三维轨迹；拖动旋转，滚轮缩放"></div>
+            <div class="scene-overlay"><div class="zero-readout"><span>磁场零点 <span class="unit">mm</span></span><output id="zero-output">—</output></div><div class="scene-axis-note">X · 冷束入射 <span>／</span> Z · 竖直向上</div></div>
+            <div id="scene-loading" class="scene-loading"><span class="spinner" aria-hidden="true"></span><span>正在建立三维场景…</span></div>
+          </div>
+          <div class="scene-options"><div class="layer-controls" aria-label="显示图层"><label class="check-label"><input id="layer-beams" type="checkbox" checked><span>光束</span></label><label class="check-label"><input id="layer-coils" type="checkbox" checked><span>线圈</span></label><label class="check-label"><input id="layer-trails" type="checkbox" checked><span>轨迹</span></label></div><div class="legend"><span><i class="atom-dot" aria-hidden="true"></i><span id="mode-legend">原子</span></span><span><i class="field-dot" aria-hidden="true"></i>磁场零点</span></div></div>
+          <div class="timeline-bar"><button id="play" class="play-button" aria-pressed="false" disabled><svg class="play-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7Z"/></svg><svg class="pause-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14"/></svg><span>回放</span></button><div class="timeline-control"><label class="sr-only" for="timeline">回放时间</label><input id="timeline" type="range" min="0" max="1" step="0.001" value="1" disabled><div class="timeline-endpoints"><span>0</span><span id="duration-label">20 ms</span></div></div><output id="time-output" class="time-output">— ms</output></div>
+          <div class="scene-caption"><span>同一批原子的计算轨迹 <span class="caption-divider">·</span> 时间轴可拖动</span><span id="compute-time"></span></div>
+        </div>
+
+        <div id="simulation-error" class="error-banner" role="alert" hidden><p id="simulation-error-text"></p><button id="retry" class="button">重算</button></div>
+
+        <section class="metrics-section" aria-label="终态留存结果" aria-busy="true">
+          <div class="metrics-heading"><h2>观察窗留存</h2><span id="metric-phase">正在计算</span></div>
+          <div class="metrics-grid">
+            <div class="metric retention-metric"><span class="metric-label">留存原子</span><div class="metric-value"><strong id="retained-count">—</strong><span id="retained-total">/ 192</span></div><p id="retained-fraction">计算中</p></div>
+            <div class="metric"><span class="metric-label">平均速率</span><div class="metric-value"><strong id="mean-speed">—</strong><span>m/s</span></div><p>留存集合</p></div>
+            <div class="metric"><span class="metric-label">RMS 云半径</span><div class="metric-value"><strong id="cloud-radius">—</strong><span>mm</span></div><p>相对云质心</p></div>
+            <div class="metric centroid-metric"><span class="metric-label">云中心 <span class="unit">mm</span></span><dl id="centroid-output"><div><dt>X</dt><dd>—</dd></div><div><dt>Y</dt><dd>—</dd></div><div><dt>Z</dt><dd>—</dd></div></dl><p>留存集合</p></div>
+          </div>
+          <p class="criterion-note"><span id="criterion-current">以光束交点为原点，末 5 ms 持续满足 r &lt; 3 mm、速率 &lt; 1 m/s。</span><span id="empty-note" hidden>当前参数下没有原子满足这一条件。</span></p>
+        </section>
+
+        <section class="comparison" aria-labelledby="comparison-title">
+          <div class="comparison-heading"><div><h2 id="comparison-title">参数比较</h2><p id="baseline-caption">把当前结果记为 A，再调参数看变化。</p></div><button id="save-baseline" class="button" disabled>记为基准 A</button></div>
+          <div id="comparison-result" class="comparison-result" hidden><div><span>留存比例 Δ</span><strong id="compare-retained">—</strong></div><div><span>云中心位移</span><strong id="compare-center">—</strong></div><div><span>平均速率 Δ</span><strong id="compare-speed">—</strong></div><button id="restore-baseline" class="text-button">恢复 A 参数</button></div>
+        </section>
+
+        <details class="basis-details" id="polarization-basis">
+          <summary><span>偏振、线圈与能级依据</span><span class="summary-value">¹⁷⁴Yb · J = 0 → 1</span></summary>
+          <div class="basis-content">
+            <div class="basis-heading"><h2>红失谐怎样产生恢复力</h2><span>零偏置 · 沿 Y 主轴截面 · b &gt; 0</span></div>
+            <p class="diagram-scroll-hint">左右滑动查看完整能级图；键盘可聚焦图框后使用方向键。</p>
+            <div class="level-diagram-scroll" role="region" tabindex="0" aria-label="能级图；窄屏可横向滚动">
+            <svg class="level-diagram" viewBox="0 0 720 360" role="img" aria-labelledby="level-title level-desc">
+              <title id="level-title">Yb 399 nm MOT 的 Zeeman 能级与恢复光力</title>
+              <desc id="level-desc">固定量子轴为正Y。在负By处，激发态m等于正1向下移动，正Y传播的H光更近共振，推原子向中心；正By处，m等于负1向下移动，负Y传播的H光更近共振，产生反向的恢复力。基态J等于0不发生一阶Zeeman分裂。</desc>
+              <defs><marker id="level-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0 7 3.5 0 7Z" fill="#5ce1e6"/></marker><marker id="level-force-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0 7 3.5 0 7Z" fill="#c7f36b"/></marker></defs>
+              <text class="level-meta" x="32" y="30">激发态 ¹P₁ · J′ = 1</text>
+              <text class="level-formula" x="688" y="30" text-anchor="end">ΔE = gJ μB m′Y BY</text>
+              <path class="level-zero" d="M360 60V282"/>
+              <path class="level-branch branch-plus" d="M132 200 588 76"/>
+              <path class="level-branch branch-zero" d="M132 138H588"/>
+              <path class="level-branch branch-minus" d="M132 76 588 200"/>
+              <text class="level-state state-plus" x="603" y="82">m′Y = +1</text>
+              <text class="level-state state-zero" x="603" y="144">m′Y = 0</text>
+              <text class="level-state state-minus" x="603" y="206">m′Y = −1</text>
+              <path class="level-laser" d="M104 200H604"/>
+              <text class="level-laser-label" x="360" y="225" text-anchor="middle">ℏωL · 红失谐</text>
+              <path class="level-ground" d="M104 274H604"/>
+              <text class="level-meta" x="32" y="301">¹S₀ · J = 0</text>
+              <text class="level-meta" x="32" y="322">mY = 0</text>
+              <path class="level-absorption" d="M132 266V206" marker-end="url(#level-arrow)"/>
+              <path class="level-absorption" d="M588 266V206" marker-end="url(#level-arrow)"/>
+              <text class="level-meta" x="157" y="252">ΔmY = +1</text>
+              <text class="level-meta" x="563" y="252" text-anchor="end">ΔmY = −1</text>
+              <path class="level-force" d="M180 315H305" marker-end="url(#level-force-arrow)"/>
+              <path class="level-force" d="M540 315H415" marker-end="url(#level-force-arrow)"/>
+              <text class="level-force-label" x="243" y="339" text-anchor="middle">k = +Y · 推向中心</text>
+              <text class="level-force-label" x="477" y="339" text-anchor="middle">k = −Y · 推向中心</text>
+              <text class="level-field-label" x="132" y="58">BY &lt; 0</text>
+              <text class="level-field-label" x="360" y="58" text-anchor="middle">BY = 0</text>
+              <text class="level-field-label" x="588" y="58" text-anchor="end">BY &gt; 0</text>
+            </svg>
+            </div>
+            <div class="basis-copy">
+              <p>在 ¹⁷⁴Yb 的 ¹S₀ → ¹P₁ 跃迁中，基态 J = 0，激发态 J′ = 1 分成 m′Y = −1、0、+1。图中固定量子轴 +Y，沿 Y 轴的激发态位移为 gJ μB m′Y BY；基态没有一阶 Zeeman 分裂。</p>
+              <p>红失谐光更接近向下移动的激发支路。BY &gt; 0 时，沿 −Y 传播的 H 光驱动 ΔmY = −1；BY &lt; 0 时，沿 +Y 传播的 H 光驱动 ΔmY = +1。两束相对各自 k 的 helicity 都是 +1。</p>
+              <p>标准主场为 <span class="inline-formula">B = b(−x/2, y, −z/2)</span>，b &gt; 0。V1/V2 使用 h = −1，与径向梯度相配；负主电流会反转梯度，光偏振保持原值。三维计算按当前位置的完整磁场方向分解偏振。</p>
+              <p>主电流正向：从 +Y 朝原点看，+Y 侧线圈逆时针、−Y 侧顺时针。偏置电流正向：从对应正轴朝原点看，两线圈均逆时针，产生该轴正向场。</p>
+            </div>
+            <p id="polarization-citations" class="basis-citations"><a href="https://physics.nist.gov/PhysRefData/Handbook/Tables/ytterbiumtable5.htm" target="_blank" rel="noopener">NIST · Yb 能级表</a><a href="https://arxiv.org/pdf/1912.08065#page=2" target="_blank" rel="noopener">Lauprêtre 等 · 399 nm 光谱</a><a href="https://arxiv.org/pdf/1409.0244#page=4" target="_blank" rel="noopener">Tarbutt · Zeeman 项与偏振选择定则</a><a href="./reports/2026-10-30-source-polarization/REPORT.md" target="_blank" rel="noopener">40 m/s 冷束重算与偏振核查 ↗</a></p>
+          </div>
+        </details>
+        <details class="method-details"><summary><span>模型与参数说明</span><span class="summary-value">半经典光力 + 随机反冲</span></summary><div class="method-content"><p>逐步积分六束 Gaussian 光的散射力、四极场 Zeeman 位移与重力；用随机光子反冲描述动量扩散。偏置磁场移动零场位置，功率不平衡改变各向散射力。</p><p>线圈换算系数当前为可编辑示例，默认冷束初态也在左栏设置。指标取模拟结束时的留存集合；回放只改变显示时刻。</p><p><a href="./METHOD.md" target="_blank" rel="noopener">查看模型、参考资料与验证记录 ↗</a></p></div></details>
+        <div class="bottom-actions"><span id="storage-status" role="status" aria-live="polite">设置仅保存在本机浏览器</span><button id="export-json" class="text-button">导出参数 JSON ↓</button></div>
+      </section>
+    </div>
+  </main>
+  <div id="announcement" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
