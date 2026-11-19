@@ -220,6 +220,7 @@ export function mountScene(container) {
   }
   function setMode(next) {
     const changed = mode !== next; mode = next; updateVisibility();
+    if (changed && compiled && mode === 'field') buildField();
     if (changed) setView(activeView); else draw();
   }
   function updateVisibility() {
@@ -267,13 +268,16 @@ export function mountScene(container) {
       const f = Math.min(result.frameCount - 1, Math.round(fraction * (result.frameCount - 1)));
       const p = points.geometry.attributes.position, color = points.geometry.attributes.color;
       const dp = densityPoints.geometry.attributes.position;
-      const c = new THREE.Color();
+      const retainedColor = new THREE.Color(C.lime), otherColor = new THREE.Color(C.cyan);
       for (let i = 0; i < result.n; i++) {
         const k = (f * result.n + i) * 3;
         const visible = !result.frameAlive || result.frameAlive[f * result.n + i];
-        const pos = Array.from(result.frames.slice(k, k + 3)).map(v => visible && Number.isFinite(v) ? v * 1000 : 1e5);
-        p.setXYZ(i, ...pos); dp.setXYZ(i, ...pos);
-        c.set(result.retained[i] && fraction > .99 ? C.lime : C.cyan); color.setXYZ(i, c.r, c.g, c.b);
+        const x = visible ? result.frames[k] * 1000 : 1e5;
+        const y = visible ? result.frames[k + 1] * 1000 : 1e5;
+        const z = visible ? result.frames[k + 2] * 1000 : 1e5;
+        p.setXYZ(i, x, y, z); dp.setXYZ(i, x, y, z);
+        const c = result.retained[i] && fraction > .99 ? retainedColor : otherColor;
+        color.setXYZ(i, c.r, c.g, c.b);
       }
       p.needsUpdate = dp.needsUpdate = color.needsUpdate = true;
       points.geometry.computeBoundingSphere(); densityPoints.geometry.computeBoundingSphere();
@@ -282,11 +286,19 @@ export function mountScene(container) {
     }
     draw();
   }
-  function setParams(next, d) {
+  function setParams(next, d, velocity = forceVelocity) {
     params = next; derived = d; compiled = compile(params);
-    buildCoils(); buildBeams(); buildSource(); buildZero(); buildField(); buildForce(); updateVisibility(); draw();
+    forceVelocity = [...velocity];
+    buildCoils(); buildBeams(); buildSource(); buildZero();
+    if (mode === 'field') buildField();
+    if (mode === 'force') buildForce();
+    updateVisibility(); draw();
   }
-  function setForceVelocity(v) { forceVelocity = [...v]; if (compiled) buildForce(); draw(); }
+  function setForceVelocity(v) {
+    if (v.every((component, axis) => component === forceVelocity[axis])) return;
+    forceVelocity = [...v];
+    if (compiled && mode === 'force') { buildForce(); draw(); }
+  }
   function draw() {
     if (disposed) return;
     camera.updateMatrixWorld();
@@ -307,7 +319,10 @@ export function mountScene(container) {
     camera.up.set(0, 0, 1); if (view === 'xy') camera.up.set(0, 1, 0);
     if (mode === 'force') center.set(0, 0, 0);
     controls.target.copy(center); camera.position.copy(center).add(vector(offsets[view] || offsets.iso).multiplyScalar(mode === 'force' ? .62 : 1));
-    if (compiled) { buildForce(); buildZero(); }
+    if (compiled) {
+      if (mode === 'force') buildForce();
+      buildZero();
+    }
     updateVisibility();
     controls.update(); draw();
   }

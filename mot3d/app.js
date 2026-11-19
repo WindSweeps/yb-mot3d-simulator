@@ -14,6 +14,8 @@ let derived = null;
 let scene = null;
 let result = null;
 let worker = null;
+let workerBackend = null;
+let runStarted = 0;
 let jobId = 0;
 let debounce = 0;
 let baseline = null;
@@ -219,8 +221,7 @@ function updateDerived() {
   $("#bias-output").textContent = coordinates(derived.biasG, 2);
   $("#zero-output").textContent = derived.zeroUnique ? coordinates(derived.zeroMM, 2) : derived.biasG.every((value) => value === 0) ? "全空间零场" : "均匀偏置场 · 无零点";
   updateCurrentDirections();
-  scene?.setParams(params, derived);
-  scene?.setForceVelocity?.(forceVelocity());
+  scene?.setParams(params, derived, forceVelocity());
 }
 
 function updateCurrentDirections() {
@@ -262,9 +263,16 @@ function clearMetrics() {
 
 function parametersChanged({ immediate = false } = {}) {
   clearTimeout(debounce);
-  worker?.terminate();
-  worker = null;
   jobId += 1;
+  if (worker && busy) {
+    if (workerBackend === 'CPU') {
+      worker.terminate();
+      worker = null;
+      workerBackend = null;
+    } else {
+      worker.postMessage({ id: jobId, cancel: true });
+    }
+  }
   busy = true;
   result = null;
   setPlaying(false);
@@ -280,6 +288,7 @@ function failSimulation(message) {
   busy = false;
   worker?.terminate();
   worker = null;
+  workerBackend = null;
   setStatus("计算未完成", "error");
   $(".metrics-section").setAttribute("aria-busy", "false");
   $("#metric-phase").textContent = "计算未完成";
@@ -291,36 +300,42 @@ function failSimulation(message) {
 }
 
 function runSimulation() {
-  const id = jobId;
-  const snapshot = clone(params);
+  runStarted = performance.now();
   try {
-    const currentWorker = new Worker(new URL("./sim-worker.js", import.meta.url), { type: "module" });
-    worker = currentWorker;
-    currentWorker.onmessage = ({ data }) => {
-      if (id !== jobId || data.id !== id) return;
-      currentWorker.terminate();
-      if (worker === currentWorker) worker = null;
-      if (data.error) { failSimulation(data.error); return; }
-      if (!data.result?.summary || !data.result?.frameCount) { failSimulation("计算结果缺少帧或统计数据。"); return; }
-      result = data.result;
-      busy = false;
-      scene?.setResult(result);
-      showTime(1);
-      showMetrics();
-      setStatus("计算完成 · seed " + snapshot.seed);
-      $("#play").disabled = false;
-      $("#timeline").disabled = false;
-      $("#save-baseline").disabled = false;
-      $("#simulation-error").hidden = true;
-      announce("计算完成，留存 " + result.summary.retained + " / " + result.n + " 个原子。");
-    };
-    currentWorker.onerror = (event) => {
-      if (id !== jobId) return;
-      event.preventDefault();
-      failSimulation(event.message || "计算线程未能运行，请通过本地网页服务打开本页。");
-    };
-    currentWorker.postMessage({ id, params: snapshot });
+    const message = { id: jobId, params };
+    if (!worker) {
+      message.shader = $("#mot-compute").textContent;
+      worker = new Worker(new URL("./sim-worker.js", import.meta.url), { type: "module" });
+      worker.onmessage = receiveSimulation;
+      worker.onerror = event => {
+        if (event.currentTarget !== worker) return;
+        event.preventDefault();
+        failSimulation(event.message || "计算线程未能运行。");
+      };
+    }
+    worker.postMessage(message);
   } catch (error) { failSimulation(error.message); }
+}
+
+function receiveSimulation(event) {
+  if (event.currentTarget !== worker) return;
+  const data = event.data;
+  if (data.backend) { workerBackend = data.backend; return; }
+  if (data.id !== jobId) return;
+  if (data.error) { failSimulation(data.error); return; }
+  if (!data.result?.summary || !data.result?.frameCount) { failSimulation("计算结果缺少帧或统计数据。"); return; }
+  result = data.result;
+  result.summary.workerRoundTripMS = performance.now() - runStarted;
+  busy = false;
+  scene?.setResult(result);
+  showTime(1);
+  showMetrics();
+  setStatus("计算完成 · " + result.summary.backend + " · seed " + result.params.seed);
+  $("#play").disabled = false;
+  $("#timeline").disabled = false;
+  $("#save-baseline").disabled = false;
+  $("#simulation-error").hidden = true;
+  announce("计算完成，留存 " + result.summary.retained + " / " + result.n + " 个原子。");
 }
 
 function radius(summary) {
@@ -343,7 +358,7 @@ function showMetrics() {
   $("#cloud-view").disabled = !summary.centroidMM;
   const criterion = summary.criterion;
   if (criterion) $("#criterion-current").textContent = "以光束交点为原点，末 " + format(criterion.holdMS, 1) + " ms 持续满足 r < " + criterion.radiusMM + " mm、速率 < " + criterion.speedMS + " m/s。";
-  const elapsed = summary.elapsedMS ?? result.elapsedMS;
+  const elapsed = summary.workerRoundTripMS;
   $("#compute-time").textContent = Number.isFinite(elapsed) ? "计算耗时 " + (elapsed < 1000 ? format(elapsed, 0) + " ms" : format(elapsed / 1000, 2) + " s") : "";
   updateComparison();
 }
@@ -536,7 +551,7 @@ function wireActions() {
 async function initScene() {
   try {
     scene = await mountScene($("#scene-viewport"), {});
-    scene.setParams(params, derived);
+    scene.setParams(params, derived, forceVelocity());
     scene.setLayers(selectedLayers());
     scene.setView(view);
     scene.setMode(mode);

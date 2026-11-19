@@ -67,7 +67,13 @@ R_{jq}=\frac{\Gamma}{2}\frac{s_jw_{jq}}{1+\sum_l s_l+4(\Delta-\mathbf k_j\cdot\m
 
 `physics.js` 导出 `DEFAULTS`、`BEAM_DIRECTIONS`、`BEAM_LABELS`、`HELICITIES`、`CONSTANTS`、`derive(params)`、`compile(params)`、`fieldAt(position, paramsOrCompiled)`、`opticalAcceleration(position,velocity,paramsOrCompiled)`、`acceleration(...)`、`radiation(...)`、`simulate(params,options)`。位置/速度/场分别为m、m/s、T；`radiation`给光加速度与六束散射率。`acceleration`另含重力。`derive.mainTensor`为主梯度乘数的对角三元组。
 
-结果：`frames`为120×n×3 Float32Array，位置单位m；`frameAlive`为120×n Uint8Array；`times`为秒；末态使用`finalPositions`、`finalVelocities`、`alive`、`retained`。`summary`含`retained`、`retainedFraction`、`centroidMM`、`rmsMM`、`meanSpeed`、`allMeanSpeed`、`validCount`、`zeroMM`、`criterion`、`elapsedMS`。测试可用`options.initialStates`传入n×6扁平SI数组、`options.frameCount`改变输出帧数。Worker接收`{id,params}`，返回`{id,result}`并转移数组；失败返回`{id,error}`，取消通过terminate完成。
+`frames` 保存 120 × n × 3 个 Float32 位置分量，单位为 m。`frameAlive` 保存逐帧的原子存活标记，`times` 以 s 为单位。末态包含 `finalPositions`、`finalVelocities`、`alive` 和 `retained`。两个后端共用入口抽样与终态统计函数。测试可传入 `options.initialStates` 指定 n × 6 个初始位置及速度分量，并用 `options.frameCount` 指定输出帧数。
+
+### 网页中的 GPU 积分
+
+`index.html` 内嵌 WGSL 计算着色器。一个线程推进一个原子，每个时间步在起点和中点计算六束光的散射力，在中点散射率下抽取随机反冲。GPU 使用单精度浮点数计算，每个原子按种子和序号维护独立随机状态。每一步均检查逃逸及留存条件，120 帧时间轴只控制回放采样密度。
+
+Worker 复用计算管线，分批提交时间步。位置、速度、随机状态与轨迹留在显存，积分结束后一次读回。调参时在两批之间取消旧任务，只显示最近一次参数对应的结果。浏览器无法提供 WebGPU 适配器时，Worker 使用 JavaScript 双精度积分。网页显示的耗时从发送参数开始，直到收到本次计算结果。
 
 ## 参考
 

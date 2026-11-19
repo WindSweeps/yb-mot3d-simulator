@@ -168,6 +168,174 @@
     </div>
   </main>
   <div id="announcement" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
+  <script type="text/wgsl" id="mot-compute">
+struct SimulationParameters {
+  counts: vec4f,           // 原子数、积分步数、回放帧数、开始判定留存的步数
+  integration: vec4f,      // 时间步长、腰斑半径平方的倒数、重力加速度、反冲开关
+  fieldSlopeAndRecoil: vec4f,
+  biasAndDetuning: vec4f,
+  spectralScales: vec4f,   // 2k/Γ、2μB/(ℏΓ)、Γ/2
+  beamAxes: array<vec4f, 3>, // 每对光束正向的传播方向和 helicity
+  peakS0123: vec4f,
+  peakS45: vec4f,
+}
+
+struct Atom {
+  position: vec3f,
+  alive: u32,
+  velocity: vec3f,
+  held: u32,
+  rng: u32,
+  nextFrame: u32,
+  padding: vec2u,
+}
+
+struct Chunk {
+  first: u32,
+  count: u32,
+  padding: vec2u,
+}
+
+struct Radiation {
+  acceleration: vec3f,
+  pairRates: vec3f,
+}
+
+@group(0) @binding(0) var<storage, read> parameters: SimulationParameters;
+@group(0) @binding(1) var<storage, read_write> atoms: array<Atom>;
+@group(0) @binding(2) var<storage, read_write> history: array<vec4f>;
+@group(0) @binding(3) var<uniform> chunk: Chunk;
+
+// 向量的三个分量分别表示 V1、V2、H。反向光束共用同一腰斑分布。
+fn radiation(position: vec3f, velocity: vec3f, axes: mat3x3f, helicity: vec3f,
+             positivePeaks: vec3f, negativePeaks: vec3f) -> Radiation {
+  let projections = transpose(axes);
+  let along = projections * position;
+  let radialSquared = max(vec3f(0.0), vec3f(dot(position, position)) - along * along);
+  let profile = exp((-2.0 * parameters.integration.y) * radialSquared);
+  let positiveS = positivePeaks * profile;
+  let negativeS = negativePeaks * profile;
+  let saturation = vec3f(1.0 + dot(positiveS + negativeS, vec3f(1.0)));
+
+  let field = parameters.fieldSlopeAndRecoil.xyz * position + parameters.biasAndDetuning.xyz;
+  let magnitude = length(field);
+  var cosine = vec3f(0.0);
+  if (magnitude > 0.0) {
+    cosine = clamp(projections * (field / magnitude), vec3f(-1.0), vec3f(1.0));
+  }
+  let spinProjection = helicity * cosine;
+  let plusAmplitude = 0.5 * (vec3f(1.0) + spinProjection);
+  let minusAmplitude = 0.5 * (vec3f(1.0) - spinProjection);
+  let sigmaPlus = plusAmplitude * plusAmplitude;
+  let sigmaMinus = minusAmplitude * minusAmplitude;
+  let piWeight = 0.5 * (vec3f(1.0) - cosine * cosine);
+
+  let detuning = vec3f(parameters.biasAndDetuning.w);
+  let doppler = parameters.spectralScales.x * (projections * velocity);
+  let zeeman = vec3f(parameters.spectralScales.y * magnitude);
+  let forward = detuning - doppler;
+  let backward = detuning + doppler;
+  let forwardPlus = forward - zeeman;
+  let forwardMinus = forward + zeeman;
+  let backwardPlus = backward - zeeman;
+  let backwardMinus = backward + zeeman;
+  let positiveRates = parameters.spectralScales.z * positiveS * (
+    sigmaPlus / (saturation + forwardPlus * forwardPlus) +
+    piWeight / (saturation + forward * forward) +
+    sigmaMinus / (saturation + forwardMinus * forwardMinus));
+  let negativeRates = parameters.spectralScales.z * negativeS * (
+    sigmaMinus / (saturation + backwardPlus * backwardPlus) +
+    piWeight / (saturation + backward * backward) +
+    sigmaPlus / (saturation + backwardMinus * backwardMinus));
+  return Radiation(parameters.fieldSlopeAndRecoil.w * (axes * (positiveRates - negativeRates)),
+                   positiveRates + negativeRates);
+}
+
+fn randomUniform(state: ptr<function, u32>) -> f32 {
+  *state += 0x6D2B79F5u;
+  var value = (*state ^ (*state >> 15u)) * (1u | *state);
+  value ^= value + ((value ^ (value >> 7u)) * (61u | value));
+  return f32(value ^ (value >> 14u)) * (1.0 / 4294967296.0);
+}
+
+fn normalPair(state: ptr<function, u32>) -> vec2f {
+  let amplitude = sqrt(-2.0 * log(max(randomUniform(state), 1e-15)));
+  let angle = 6.283185307179586 * randomUniform(state);
+  return amplitude * vec2f(cos(angle), sin(angle));
+}
+
+@compute @workgroup_size(32)
+fn advance(@builtin(global_invocation_id) invocation: vec3u) {
+  let atomId = invocation.x;
+  let atomCount = u32(parameters.counts.x);
+  if (atomId >= atomCount) { return; }
+  var atom = atoms[atomId];
+  if (chunk.first == 0u) { history[atomId] = vec4f(atom.position, 1.0); }
+  if (atom.alive == 0u) { return; }
+  let totalSteps = u32(parameters.counts.y);
+  let frameCount = u32(parameters.counts.z);
+  let intervals = frameCount - 1u;
+  let firstHoldStep = u32(parameters.counts.w);
+  let dt = parameters.integration.x;
+  let gravity = vec3f(0.0, 0.0, parameters.integration.z);
+  let recoilSpeed = parameters.fieldSlopeAndRecoil.w;
+  let v1 = parameters.beamAxes[0];
+  let v2 = parameters.beamAxes[1];
+  let horizontal = parameters.beamAxes[2];
+  let axes = mat3x3f(v1.xyz, v2.xyz, horizontal.xyz);
+  let helicity = vec3f(v1.w, v2.w, horizontal.w);
+  let positivePeaks = vec3f(parameters.peakS0123.xz, parameters.peakS45.x);
+  let negativePeaks = vec3f(parameters.peakS0123.yw, parameters.peakS45.y);
+  let endStep = min(chunk.first + chunk.count, totalSteps);
+  var rng = atom.rng;
+
+  for (var step = chunk.first; step < endStep; step++) {
+    let oldPosition = atom.position;
+    let startRates = radiation(atom.position, atom.velocity, axes, helicity, positivePeaks, negativePeaks);
+    let midPosition = atom.position + (0.5 * dt) * atom.velocity;
+    let midVelocity = atom.velocity + (0.5 * dt) * (startRates.acceleration + gravity);
+    let midRates = radiation(midPosition, midVelocity, axes, helicity, positivePeaks, negativePeaks);
+    atom.position += dt * midVelocity;
+    atom.velocity += dt * (midRates.acceleration + gravity);
+    if (parameters.integration.w != 0.0) {
+      let normal01 = normalPair(&rng);
+      let normal23 = normalPair(&rng);
+      let normal45 = normalPair(&rng);
+      let absorption = sqrt(midRates.pairRates * dt) * vec3f(normal01, normal23.x);
+      let emission = sqrt(dot(midRates.pairRates, vec3f(1.0)) * dt / 3.0);
+      atom.velocity += recoilSpeed * (axes * absorption + emission * vec3f(normal23.y, normal45));
+    }
+    let radiusSquared = dot(atom.position, atom.position);
+    let finiteVelocity = all((bitcast<vec3u>(atom.velocity) & vec3u(0x7f800000u)) != vec3u(0x7f800000u));
+    if (!(radiusSquared <= 0.15 * 0.15) || !finiteVelocity) {
+      atom.alive = 0u;
+      atom.held = 0u;
+    }
+    let completed = step + 1u;
+    if (completed >= firstHoldStep &&
+        (radiusSquared >= 0.003 * 0.003 || dot(atom.velocity, atom.velocity) >= 1.0)) {
+      atom.held = 0u;
+    }
+    // 以整数确定回放帧所属的积分步，插值保留计算精度。
+    while (atom.nextFrame < frameCount && atom.nextFrame * totalSteps <= completed * intervals) {
+      let numerator = atom.nextFrame * totalSteps - step * intervals;
+      let fraction = f32(numerator) / f32(intervals);
+      history[atom.nextFrame * atomCount + atomId] =
+        vec4f(mix(oldPosition, atom.position, fraction), f32(atom.alive));
+      atom.nextFrame++;
+    }
+    if (atom.alive == 0u) {
+      while (atom.nextFrame < frameCount) {
+        history[atom.nextFrame * atomCount + atomId] = vec4f(atom.position, 0.0);
+        atom.nextFrame++;
+      }
+      break;
+    }
+  }
+  atom.rng = rng;
+  atoms[atomId] = atom;
+}
+  </script>
   <script type="module" src="./app.js"></script>
 </body>
 </html>

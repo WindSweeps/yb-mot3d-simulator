@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3D MOT WebGPU 数值测试</title>
+<pre id="result">正在验证 GPU 模拟。</pre>
+<script type="module">
+  const output = document.getElementById('result');
+  const page = await fetch('../index.html');
+  if (!page.ok) throw new Error('MOT 网页读取失败 ' + page.status);
+  const documentCopy = new DOMParser().parseFromString(await page.text(), 'text/html');
+  const shader = documentCopy.querySelector('script#mot-compute[type="text/wgsl"]').textContent;
+  const worker = new Worker('./webgpu.test.mjs', {type: 'module'});
+  worker.onerror = event => { output.textContent = event.message; worker.terminate(); };
+  worker.onmessage = ({data}) => {
+    if (data.progress) output.textContent += '\n' + data.progress;
+    else {
+      output.textContent = data.error ?? JSON.stringify(data.result, null, 2);
+      worker.terminate();
+    }
+  };
+  worker.postMessage(shader);
+</script>
+</html>

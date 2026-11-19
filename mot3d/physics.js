@@ -173,10 +173,6 @@ export function simulate(input = {}, options = {}) {
   const times = Float64Array.from({ length: frameCount }, (_, i) => duration*i/(frameCount-1));
   const finalPositions = new Float64Array(n*3), finalVelocities = new Float64Array(n*3);
   const alive = new Uint8Array(n), retained = new Uint8Array(n);
-  const yaw = p.sourceYawDeg*Math.PI/180, pitch = p.sourcePitchDeg*Math.PI/180;
-  const sourceDirection = [Math.cos(yaw)*Math.cos(pitch), Math.sin(yaw)*Math.cos(pitch), Math.sin(pitch)];
-  const initialLongitudinalVelocities = Float64Array.from({length:n}, (_,i) =>
-    sourceDirection.reduce((sum,d,a) => sum+d*initial[6*i+3+a],0));
   const out = new Float64Array(9), mid = new Float64Array(9), s = new Float64Array(6);
   for (let i=0;i<n;i++) {
     let [x,y,z,vx,vy,vz] = initial.subarray(i*6,i*6+6), nextFrame = 1, live = true, held = true;
@@ -215,6 +211,19 @@ export function simulate(input = {}, options = {}) {
     finalPositions.set([x,y,z],i*3); finalVelocities.set([vx,vy,vz],i*3);
     alive[i] = live ? 1 : 0; retained[i] = live && held ? 1 : 0;
   }
+  return finishSimulation(c, initial, {
+    n, frameCount, frames, frameAlive, times, finalPositions, finalVelocities, alive, retained,
+  }, started);
+}
+
+export function finishSimulation(c, initial, output, started) {
+  const p = c.params;
+  const { n, finalPositions, finalVelocities, alive, retained } = output;
+  const hold = Math.min(.005, p.durationMS * 1e-3);
+  const yaw = p.sourceYawDeg*Math.PI/180, pitch = p.sourcePitchDeg*Math.PI/180;
+  const sourceDirection = [Math.cos(yaw)*Math.cos(pitch), Math.sin(yaw)*Math.cos(pitch), Math.sin(pitch)];
+  const initialLongitudinalVelocities = Float64Array.from({length:n}, (_,i) =>
+    sourceDirection.reduce((sum,d,a) => sum+d*initial[6*i+3+a],0));
   let count=0, validCount=0, allSpeed=0, capturedSpeed=0;
   const centroid=[0,0,0], moments=[0,0,0];
   for (let i=0;i<n;i++) {
@@ -235,7 +244,7 @@ export function simulate(input = {}, options = {}) {
     });
     return {n:count,meanMS:count?mean:null,stdMS:count?Math.sqrt(Math.max(0,m2/count)):null};
   };
-  return { params:p,n,frameCount,frames,frameAlive,times,finalPositions,finalVelocities,alive,retained,
+  return { params:p, ...output,
     initialLongitudinalVelocities,
     summary:{ retained:count,retainedFraction:count/n,centroidMM:count?centroid:null,
       rmsMM:count?moments.map(v=>Math.sqrt(Math.max(0,v/count))):null,

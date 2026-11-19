@@ -6,6 +6,8 @@
 
 采用 174Yb 399 nm 的半经典散射力、Doppler/Zeeman 位移、重力和随机光子反冲。默认 waist 为 6 mm，冷束纵速的母高斯参数为 μ=40 m/s、σ=14.7 m/s，仅抽取正向速度。主四极场轴与水平 MOT 光轴同向，网页包含圆偏振、电流方向及能级依据。线圈换算系数为可编辑示例。
 
+HTML 中的 WebGPU 计算着色器逐原子并行积分。页面显示本批计算的后端和耗时，浏览器无法提供 WebGPU 适配器时使用 CPU Worker。可在[数值测试页](mot3d/tests/webgpu.html)核对两个后端，并测量本机对 192、768 个原子的计算时间。
+
 - [模型、参数来源与参考文献](mot3d/METHOD.md)
 - [40 m/s 冷束捕获重算报告](mot3d/reports/2026-10-30-source-polarization/REPORT.md)
 - [复算原始统计](mot3d/reports/2026-10-30-source-polarization/results.json)
