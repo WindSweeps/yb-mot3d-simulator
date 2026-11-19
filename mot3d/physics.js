@@ -170,33 +170,37 @@ export function simulate(input = {}, options = {}) {
   const hold = Math.min(.005, duration), holdStart = duration-hold, radius = .003, speedLimit = 1;
   const domainRadius = .15; // computational termination sphere, not a physical aperture
   const frames = new Float32Array(frameCount*n*3), frameAlive = new Uint8Array(frameCount*n);
+  const framePhotons = new Float32Array(frameCount*n);
   const times = Float64Array.from({ length: frameCount }, (_, i) => duration*i/(frameCount-1));
   const finalPositions = new Float64Array(n*3), finalVelocities = new Float64Array(n*3);
   const alive = new Uint8Array(n), retained = new Uint8Array(n);
   const out = new Float64Array(9), mid = new Float64Array(9), s = new Float64Array(6);
   for (let i=0;i<n;i++) {
     let [x,y,z,vx,vy,vz] = initial.subarray(i*6,i*6+6), nextFrame = 1, live = true, held = true;
+    let emittedPhotons = 0;
     const rng = random((p.seed ^ Math.imul(i+1, 0x9E3779B1) ^ 0xA341316C) >>> 0);
     frames.set([x,y,z], i*3); frameAlive[i] = 1;
     if (holdStart === 0 && (Math.hypot(x,y,z)>=radius || Math.hypot(vx,vy,vz)>=speedLimit)) held = false;
     for (let step=0;step<steps;step++) {
       const time = (step+1)*dt, oldX=x,oldY=y,oldZ=z;
+      let stepPhotons = 0;
       if (live) {
         evaluate(x,y,z,vx,vy,vz,c,out,s);
         const hx=x+.5*dt*vx,hy=y+.5*dt*vy,hz=z+.5*dt*vz;
         const hvx=vx+.5*dt*out[0],hvy=vy+.5*dt*out[1],hvz=vz+.5*dt*(out[2]+c.gravityZ);
         evaluate(hx,hy,hz,hvx,hvy,hvz,c,mid,s);
+        const totalRate = (mid[3]+mid[4]) + (mid[5]+mid[6]) + (mid[7]+mid[8]);
+        stepPhotons = totalRate * dt;
         x += dt*hvx; y += dt*hvy; z += dt*hvz;
         vx += dt*mid[0]; vy += dt*mid[1]; vz += dt*(mid[2]+c.gravityZ);
         if (p.recoil) {
           // Independent absorption shot noise along each beam pair plus isotropic emission.
-          let total = 0;
           for (let pair=0;pair<3;pair++) {
-            const rate = mid[3+2*pair]+mid[4+2*pair]; total += rate;
+            const rate = mid[3+2*pair]+mid[4+2*pair];
             const kick = RECOIL*Math.sqrt(rate*dt)*rng.normal(), d=BEAM_DIRECTIONS[2*pair];
             vx += kick*d[0]; vy += kick*d[1]; vz += kick*d[2];
           }
-          const emission = RECOIL*Math.sqrt(total*dt/3);
+          const emission = RECOIL*Math.sqrt(stepPhotons/3);
           vx += emission*rng.normal(); vy += emission*rng.normal(); vz += emission*rng.normal();
         }
         if (Math.hypot(x,y,z)>domainRadius || !Number.isFinite(vx+vy+vz+x+y+z)) live = false;
@@ -205,14 +209,16 @@ export function simulate(input = {}, options = {}) {
       while (nextFrame < frameCount && times[nextFrame] <= time+1e-14) {
         const f = Math.max(0, Math.min(1, (times[nextFrame]-(time-dt))/dt)), o=(nextFrame*n+i)*3;
         frames[o] = oldX+f*(x-oldX); frames[o+1] = oldY+f*(y-oldY); frames[o+2] = oldZ+f*(z-oldZ);
+        framePhotons[nextFrame*n+i] = emittedPhotons + f*stepPhotons;
         frameAlive[nextFrame*n+i] = live ? 1 : 0; nextFrame++;
       }
+      emittedPhotons += stepPhotons;
     }
     finalPositions.set([x,y,z],i*3); finalVelocities.set([vx,vy,vz],i*3);
     alive[i] = live ? 1 : 0; retained[i] = live && held ? 1 : 0;
   }
   return finishSimulation(c, initial, {
-    n, frameCount, frames, frameAlive, times, finalPositions, finalVelocities, alive, retained,
+    n, frameCount, frames, frameAlive, framePhotons, times, finalPositions, finalVelocities, alive, retained,
   }, started);
 }
 

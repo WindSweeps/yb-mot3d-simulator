@@ -11,6 +11,7 @@ HTML 中的 WebGPU 计算着色器逐原子并行积分。页面显示本批计�
 - [模型、参数来源与参考文献](mot3d/METHOD.md)
 - [40 m/s 冷束捕获重算报告](mot3d/reports/2026-10-30-source-polarization/REPORT.md)
 - [复算原始统计](mot3d/reports/2026-10-30-source-polarization/results.json)
+- [399 nm 原子荧光模式](https://windsweeps.github.io/yb-mot3d-simulator/mot3d/#fluorescence)按可调的 ¹⁷⁴Yb 入口通量模拟空阱连续加载，显示 XZ 发射率投影、全空间光子率和辐射功率。默认通量示例为 10⁹ 原子/s。
 
 ## 本地运行
 
@@ -28,6 +29,7 @@ python3 -m http.server 4174 --bind 127.0.0.1
 
 ```sh
 node mot3d/physics.test.mjs
+node mot3d/fluorescence.test.mjs
 node mot3d/reports/2026-10-30-source-polarization/run.mjs
 ```
 

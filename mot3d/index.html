@@ -85,17 +85,51 @@
 
       <section class="result-workspace" id="scene-section" aria-label="三维场景与计算结果">
         <div class="scene-card">
-          <div class="mode-tabs" role="tablist" aria-label="显示物理量"><button id="mode-trajectories" class="mode-tab is-active" role="tab" data-mode="trajectories" aria-controls="scene-panel" aria-selected="true" tabindex="0">原子轨迹</button><button id="mode-field" class="mode-tab" role="tab" data-mode="field" aria-controls="scene-panel" aria-selected="false" tabindex="-1">磁场线</button><button id="mode-force" class="mode-tab" role="tab" data-mode="force" aria-controls="scene-panel" aria-selected="false" tabindex="-1">光力</button><button id="mode-density" class="mode-tab" role="tab" data-mode="density" aria-controls="scene-panel" aria-selected="false" tabindex="-1">云团密度</button></div>
+          <div class="mode-tabs" role="tablist" aria-label="显示物理量">
+            <button id="mode-trajectories" class="mode-tab is-active" role="tab" data-mode="trajectories" aria-controls="scene-panel" aria-selected="true" tabindex="0">原子轨迹</button>
+            <button id="mode-field" class="mode-tab" role="tab" data-mode="field" aria-controls="scene-panel" aria-selected="false" tabindex="-1">磁场线</button>
+            <button id="mode-force" class="mode-tab" role="tab" data-mode="force" aria-controls="scene-panel" aria-selected="false" tabindex="-1">光力</button>
+            <button id="mode-density" class="mode-tab" role="tab" data-mode="density" aria-controls="scene-panel" aria-selected="false" tabindex="-1">云团密度</button>
+            <button id="mode-fluorescence" class="mode-tab" role="tab" data-mode="fluorescence" aria-controls="scene-panel" aria-selected="false" tabindex="-1">原子荧光</button>
+          </div>
           <div class="scene-toolbar"><div class="scene-heading"><h2>三维 MOT</h2><span id="run-status" class="run-status" role="status" aria-live="polite">正在准备…</span></div><div class="view-buttons" role="group" aria-label="场景视角"><button data-view="iso" class="small-button is-active" aria-pressed="true">三维</button><button data-view="xy" class="small-button" aria-pressed="false">XY</button><button data-view="xz" class="small-button" aria-pressed="false">XZ</button><button data-view="yz" class="small-button" aria-pressed="false">YZ</button><button id="cloud-view" data-view="cloud" class="small-button" aria-pressed="false" title="放大终态留存云的中心" hidden disabled>云团放大</button></div></div>
           <div class="mode-description"><span id="mode-description">同一批冷束原子在六束光与磁场中的运动。</span><label id="force-velocity-control" hidden>测试速度 <select id="force-velocity"><option value="static">v = 0</option><option value="source">冷束入射速度</option></select></label></div>
           <div class="scene-container" id="scene-panel" role="tabpanel" aria-labelledby="mode-trajectories">
+            <section id="fluorescence" aria-label="连续注入的原子荧光" hidden>
+              <div class="flux-row">
+                <label for="incident-flux">¹⁷⁴Yb 入射通量 Φ</label>
+                <div><input type="number" id="incident-flux" min="0" max="1000000" step="any" value="1" required aria-describedby="flux-unit"><span id="flux-unit">× 10⁹ 原子/s</span></div>
+              </div>
+              <figure class="fluorescence-figure">
+                <figcaption><strong>荧光发射分布</strong><span>沿 Y 轴投影 · XZ 平面</span></figcaption>
+                <div class="fluorescence-map">
+                  <div class="z-ticks" aria-hidden="true"><span>+14</span><span>Z / mm</span><span>−14</span></div>
+                  <div class="fluorescence-image">
+                    <canvas id="fluorescence-canvas" role="img" aria-label="399 nm 原子荧光发射率分布，横向为 X，向上为正 Z"></canvas>
+                    <span id="fluorescence-empty">正在计算散射光子数</span>
+                  </div>
+                  <div class="x-ticks" aria-hidden="true"><span>−28</span><span>X / mm</span><span>+28</span></div>
+                </div>
+                <div class="fluorescence-scale" id="fluorescence-scale">
+                  <span>固定对数色标 · 光子/(s·像素)</span>
+                  <div class="scale-key"><div class="scale-gradient"></div><div class="scale-ticks"><span>≤10⁶</span><span>10¹⁰</span><span>≥10¹⁴</span></div></div>
+                </div>
+              </figure>
+              <dl class="fluorescence-readouts">
+                <div><dt>全空间发射率</dt><dd><output id="emitted-rate">—</output></dd></div>
+                <div><dt>全空间辐射功率</dt><dd><output id="emitted-power">—</output></dd></div>
+                <div><dt>视野内发射率</dt><dd><output id="roi-rate">—</output></dd></div>
+                <div><dt>预计加载率 · 末窗留存</dt><dd><output id="loading-rate">—</output></dd></div>
+              </dl>
+              <p class="fluorescence-note">从空阱开始连续注入 ¹⁷⁴Yb，按独立原子近似叠加留存和飞越原子的荧光。每个像素覆盖 0.25 × 0.25 mm²，发射率和功率按全立体角（4π）计算。相机计数还取决于光学收集效率和量子效率。预计加载率等于入口通量乘以本批原子的末窗留存比例。</p>
+            </section>
             <div id="scene-viewport" class="scene-viewport" aria-label="六束光、线圈和原子三维轨迹；拖动旋转，滚轮缩放"></div>
             <div class="scene-overlay"><div class="zero-readout"><span>磁场零点 <span class="unit">mm</span></span><output id="zero-output">—</output></div><div class="scene-axis-note">X · 冷束入射 <span>／</span> Z · 竖直向上</div></div>
             <div id="scene-loading" class="scene-loading"><span class="spinner" aria-hidden="true"></span><span>正在建立三维场景…</span></div>
           </div>
           <div class="scene-options"><div class="layer-controls" aria-label="显示图层"><label class="check-label"><input id="layer-beams" type="checkbox" checked><span>光束</span></label><label class="check-label"><input id="layer-coils" type="checkbox" checked><span>线圈</span></label><label class="check-label"><input id="layer-trails" type="checkbox" checked><span>轨迹</span></label></div><div class="legend"><span><i class="atom-dot" aria-hidden="true"></i><span id="mode-legend">原子</span></span><span><i class="field-dot" aria-hidden="true"></i>磁场零点</span></div></div>
           <div class="timeline-bar"><button id="play" class="play-button" aria-pressed="false" disabled><svg class="play-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7Z"/></svg><svg class="pause-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14"/></svg><span>回放</span></button><div class="timeline-control"><label class="sr-only" for="timeline">回放时间</label><input id="timeline" type="range" min="0" max="1" step="0.001" value="1" disabled><div class="timeline-endpoints"><span>0</span><span id="duration-label">20 ms</span></div></div><output id="time-output" class="time-output">— ms</output></div>
-          <div class="scene-caption"><span>同一批原子的计算轨迹 <span class="caption-divider">·</span> 时间轴可拖动</span><span id="compute-time"></span></div>
+          <div class="scene-caption"><span id="timeline-caption">同一批原子的计算轨迹 · 时间轴可拖动</span><span id="compute-time"></span></div>
         </div>
 
         <div id="simulation-error" class="error-banner" role="alert" hidden><p id="simulation-error-text"></p><button id="retry" class="button">重算</button></div>
@@ -182,12 +216,13 @@ struct SimulationParameters {
 
 struct Atom {
   position: vec3f,
-  alive: u32,
+  visibleFrames: u32,      // 逃逸前可见的回放帧数，初始为总帧数
   velocity: vec3f,
   held: u32,
   rng: u32,
   nextFrame: u32,
-  padding: vec2u,
+  wholePhotons: u32,
+  fractionalPhotons: f32,
 }
 
 struct Chunk {
@@ -270,10 +305,10 @@ fn advance(@builtin(global_invocation_id) invocation: vec3u) {
   let atomCount = u32(parameters.counts.x);
   if (atomId >= atomCount) { return; }
   var atom = atoms[atomId];
-  if (chunk.first == 0u) { history[atomId] = vec4f(atom.position, 1.0); }
-  if (atom.alive == 0u) { return; }
-  let totalSteps = u32(parameters.counts.y);
   let frameCount = u32(parameters.counts.z);
+  if (chunk.first == 0u) { history[atomId] = vec4f(atom.position, 0.0); }
+  if (atom.visibleFrames < frameCount) { return; }
+  let totalSteps = u32(parameters.counts.y);
   let intervals = frameCount - 1u;
   let firstHoldStep = u32(parameters.counts.w);
   let dt = parameters.integration.x;
@@ -288,6 +323,8 @@ fn advance(@builtin(global_invocation_id) invocation: vec3u) {
   let negativePeaks = vec3f(parameters.peakS0123.yw, parameters.peakS45.y);
   let endStep = min(chunk.first + chunk.count, totalSteps);
   var rng = atom.rng;
+  // 整数光子数精确累加，小数余量随每一批积分传递。
+  var chunkPhotons = atom.fractionalPhotons;
 
   for (var step = chunk.first; step < endStep; step++) {
     let oldPosition = atom.position;
@@ -295,6 +332,7 @@ fn advance(@builtin(global_invocation_id) invocation: vec3u) {
     let midPosition = atom.position + (0.5 * dt) * atom.velocity;
     let midVelocity = atom.velocity + (0.5 * dt) * (startRates.acceleration + gravity);
     let midRates = radiation(midPosition, midVelocity, axes, helicity, positivePeaks, negativePeaks);
+    let stepPhotons = dot(midRates.pairRates, vec3f(1.0)) * dt;
     atom.position += dt * midVelocity;
     atom.velocity += dt * (midRates.acceleration + gravity);
     if (parameters.integration.w != 0.0) {
@@ -302,13 +340,13 @@ fn advance(@builtin(global_invocation_id) invocation: vec3u) {
       let normal23 = normalPair(&rng);
       let normal45 = normalPair(&rng);
       let absorption = sqrt(midRates.pairRates * dt) * vec3f(normal01, normal23.x);
-      let emission = sqrt(dot(midRates.pairRates, vec3f(1.0)) * dt / 3.0);
+      let emission = sqrt(stepPhotons / 3.0);
       atom.velocity += recoilSpeed * (axes * absorption + emission * vec3f(normal23.y, normal45));
     }
     let radiusSquared = dot(atom.position, atom.position);
     let finiteVelocity = all((bitcast<vec3u>(atom.velocity) & vec3u(0x7f800000u)) != vec3u(0x7f800000u));
     if (!(radiusSquared <= 0.15 * 0.15) || !finiteVelocity) {
-      atom.alive = 0u;
+      atom.visibleFrames = atom.nextFrame;
       atom.held = 0u;
     }
     let completed = step + 1u;
@@ -321,17 +359,20 @@ fn advance(@builtin(global_invocation_id) invocation: vec3u) {
       let numerator = atom.nextFrame * totalSteps - step * intervals;
       let fraction = f32(numerator) / f32(intervals);
       history[atom.nextFrame * atomCount + atomId] =
-        vec4f(mix(oldPosition, atom.position, fraction), f32(atom.alive));
+        vec4f(mix(oldPosition, atom.position, fraction), f32(atom.wholePhotons) + (chunkPhotons + fraction * stepPhotons));
       atom.nextFrame++;
     }
-    if (atom.alive == 0u) {
+    chunkPhotons += stepPhotons;
+    if (atom.visibleFrames < frameCount) {
       while (atom.nextFrame < frameCount) {
-        history[atom.nextFrame * atomCount + atomId] = vec4f(atom.position, 0.0);
+        history[atom.nextFrame * atomCount + atomId] = vec4f(atom.position, f32(atom.wholePhotons) + chunkPhotons);
         atom.nextFrame++;
       }
       break;
     }
   }
+  atom.wholePhotons += u32(chunkPhotons);
+  atom.fractionalPhotons = fract(chunkPhotons);
   atom.rng = rng;
   atoms[atomId] = atom;
 }

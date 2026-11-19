@@ -26,7 +26,7 @@ function parameterBlock(model, steps, frameCount, firstHeldStep, dt) {
   ]);
 }
 
-function writeInitialAtoms(device, buffer, params, initial, checkInitialHold) {
+function writeInitialAtoms(device, buffer, params, initial, checkInitialHold, frameCount) {
   const packed = new ArrayBuffer(params.n * ATOM_BYTES);
   const floats = new Float32Array(packed);
   const flags = new Uint32Array(packed);
@@ -37,7 +37,7 @@ function writeInitialAtoms(device, buffer, params, initial, checkInitialHold) {
     const velocity = initial.subarray(input + 3, input + 6);
     floats.set(position, offset);
     floats.set(velocity, offset + 4);
-    flags[offset + 3] = 1;
+    flags[offset + 3] = frameCount;
     flags[offset + 7] = Number(!checkInitialHold || (Math.hypot(...position) < .003 && Math.hypot(...velocity) < 1));
     flags[offset + 8] = params.seed ^ Math.imul(i + 1, 0x9E3779B1) ^ 0xA341316C;
     flags[offset + 9] = 1;
@@ -48,12 +48,13 @@ function writeInitialAtoms(device, buffer, params, initial, checkInitialHold) {
 function readOutput(mapped, n, frameCount, duration) {
   const frames = new Float32Array(frameCount * n * 3);
   const frameAlive = new Uint8Array(frameCount * n);
+  const framePhotons = new Float32Array(frameCount * n);
   const history = new Float32Array(mapped, n * ATOM_BYTES);
   for (let i = 0; i < frameAlive.length; i++) {
     frames[3 * i] = history[4 * i];
     frames[3 * i + 1] = history[4 * i + 1];
     frames[3 * i + 2] = history[4 * i + 2];
-    frameAlive[i] = history[4 * i + 3];
+    framePhotons[i] = history[4 * i + 3];
   }
 
   const finalPositions = new Float64Array(3 * n);
@@ -66,12 +67,14 @@ function readOutput(mapped, n, frameCount, duration) {
     const offset = i * ATOM_WORDS;
     finalPositions.set(floats.subarray(offset, offset + 3), 3 * i);
     finalVelocities.set(floats.subarray(offset + 4, offset + 7), 3 * i);
-    alive[i] = flags[offset + 3];
+    const visibleFrames = flags[offset + 3];
+    for (let frame = 0; frame < visibleFrames; frame++) frameAlive[frame * n + i] = 1;
+    alive[i] = Number(visibleFrames === frameCount);
     retained[i] = alive[i] && flags[offset + 7];
   }
 
   const times = Float64Array.from({ length: frameCount }, (_, i) => duration * i / (frameCount - 1));
-  return { n, frameCount, frames, frameAlive, times, finalPositions, finalVelocities, alive, retained };
+  return { n, frameCount, frames, frameAlive, framePhotons, times, finalPositions, finalVelocities, alive, retained };
 }
 
 async function integrate(device, pipeline, layout, input, options) {
@@ -126,7 +129,7 @@ async function integrate(device, pipeline, layout, input, options) {
       ],
     });
     device.queue.writeBuffer(constants, 0, parameters);
-    writeInitialAtoms(device, state, model.params, initial, holdStart === 0);
+    writeInitialAtoms(device, state, model.params, initial, holdStart === 0, frameCount);
 
     const groups = Math.ceil(n / WORKGROUP_SIZE);
     for (let firstStep = 0; firstStep < steps;) {

@@ -1,5 +1,6 @@
 import * as Physics from "./physics.js";
-import { mountScene } from "./render.js";
+import { DEFAULT_FLUX } from "./fluorescence.js";
+import { mountFluorescence } from "./fluorescence-view.js";
 
 const { DEFAULTS, derive } = Physics;
 const $ = (selector) => document.querySelector(selector);
@@ -12,6 +13,7 @@ const controls = new Map();
 let params = clone(DEFAULTS);
 let derived = null;
 let scene = null;
+let sceneRequested = false;
 let result = null;
 let worker = null;
 let workerBackend = null;
@@ -28,6 +30,9 @@ let view = "iso";
 let busy = true;
 const playbackSeconds = 7;
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
+const fluorescence = mountFluorescence($("#fluorescence"), () => {
+  if (result && mode === "fluorescence") fluorescence.show(selectedFrame());
+});
 
 const scalarSpecs = [
   { key: "detuningMHz", label: "共同失谐 Δ", unit: "MHz", min: -100, max: 10, step: 1, target: "#light-controls", range: true },
@@ -275,6 +280,7 @@ function parametersChanged({ immediate = false } = {}) {
   }
   busy = true;
   result = null;
+  fluorescence.setResult(null);
   setPlaying(false);
   scene?.setResult(null);
   clearMetrics();
@@ -290,6 +296,7 @@ function failSimulation(message) {
   worker = null;
   workerBackend = null;
   setStatus("计算未完成", "error");
+  fluorescence.setMessage("计算未完成");
   $(".metrics-section").setAttribute("aria-busy", "false");
   $("#metric-phase").textContent = "计算未完成";
   $("#retained-fraction").textContent = "—";
@@ -323,8 +330,12 @@ function receiveSimulation(event) {
   if (data.backend) { workerBackend = data.backend; return; }
   if (data.id !== jobId) return;
   if (data.error) { failSimulation(data.error); return; }
-  if (!data.result?.summary || !data.result?.frameCount) { failSimulation("计算结果缺少帧或统计数据。"); return; }
+  if (!data.result?.summary || !data.result.frameCount || data.result.framePhotons?.length !== data.result.n * data.result.frameCount) {
+    failSimulation("计算结果缺少轨迹、荧光或统计数据。");
+    return;
+  }
   result = data.result;
+  fluorescence.setResult(result);
   result.summary.workerRoundTripMS = performance.now() - runStarted;
   busy = false;
   scene?.setResult(result);
@@ -340,6 +351,10 @@ function receiveSimulation(event) {
 
 function radius(summary) {
   return summary.rmsMM ? Math.hypot(...summary.rmsMM) : null;
+}
+
+function selectedFrame() {
+  return Math.round(fraction * (result.frameCount - 1));
 }
 
 function showMetrics() {
@@ -367,11 +382,11 @@ function showTime(value) {
   fraction = Math.max(0, Math.min(1, value));
   $("#timeline").value = String(fraction);
   fillRange($("#timeline"));
-  scene?.setTime(fraction);
+  if (mode !== "fluorescence") scene?.setTime(fraction);
   if (!result) return;
-  const times = result.times;
-  const endMS = times?.length ? times[times.length - 1] * 1000 : (result.params?.durationMS ?? params.durationMS);
-  $("#time-output").textContent = format(fraction * endMS, 1) + " ms";
+  const frame = selectedFrame();
+  if (mode === "fluorescence") fluorescence.show(frame);
+  $("#time-output").textContent = format(result.times[frame] * 1000, 1) + " ms";
 }
 
 function setPlaying(value) {
@@ -408,17 +423,23 @@ function updateComparison() {
 
 function setMode(next, focus = false) {
   mode = next;
+  const showsFluorescence = mode === "fluorescence";
+  $("#fluorescence").hidden = !showsFluorescence;
+  $(".scene-card").classList.toggle("fluorescence-active", showsFluorescence);
+  $(".scene-heading h2").textContent = showsFluorescence ? "399 nm 原子荧光" : "三维 MOT";
+  $("#timeline-caption").textContent = showsFluorescence ? "连续开束后的时间 · 观察窗内的瞬时发射率" : "同一批原子的计算轨迹 · 时间轴可拖动";
   const descriptions = {
     trajectories: "同一批冷束原子在六束光与磁场中的运动。",
     field: "主四极场与三轴偏置叠加后的磁场线。",
     force: "光加速度：3 mm 箭长对应 5×10⁴ m/s²（平方根刻度，最长 5 mm）；平面视角显示中心切片。",
     density: "当前时刻的热原子云；密度核化平滑用于观察云形与位置。",
+    fluorescence: "六束 MOT 光激发的自发辐射。调节入口通量，查看给定开束时长下的发射率。",
   };
   $("#mode-description").textContent = descriptions[mode];
   $("#force-velocity-control").hidden = mode !== "force";
   $("#cloud-view").hidden = mode !== "density";
   $("#scene-panel").setAttribute("aria-labelledby", "mode-" + mode);
-  $("#mode-legend").textContent = { trajectories: "原子", field: "磁场线", force: "光力方向", density: "热云密度" }[mode];
+  $("#mode-legend").textContent = { trajectories: "原子", field: "磁场线", force: "光力方向", density: "热云密度", fluorescence: "荧光" }[mode];
   if (view === "cloud" && mode !== "density") {
     view = "iso";
     scene?.setView(view);
@@ -435,8 +456,14 @@ function setMode(next, focus = false) {
     button.classList.toggle("is-active", selected);
     if (selected && focus) button.focus();
   });
-  scene?.setMode(mode);
-  scene?.setForceVelocity?.(forceVelocity());
+  if (showsFluorescence) {
+    if (result) fluorescence.show(selectedFrame());
+  } else {
+    if (!sceneRequested) void initScene();
+    scene?.setMode(mode);
+    scene?.setForceVelocity?.(forceVelocity());
+    if (result) scene?.setTime(fraction);
+  }
 }
 
 function selectedLayers() {
@@ -465,10 +492,14 @@ function restoredParams(saved) {
   return next;
 }
 
-function replaceParams(next) {
-  params = restoredParams(next);
+function replaceParams(next, incidentFlux = DEFAULT_FLUX) {
+  const restored = restoredParams(next);
+  fluorescence.setFlux(incidentFlux);
+  const changed = JSON.stringify(params) !== JSON.stringify(restored);
+  params = restored;
   syncControls();
-  parametersChanged({ immediate: true });
+  if (changed || !result) parametersChanged({ immediate: true });
+  else if (mode === "fluorescence") fluorescence.show(selectedFrame());
 }
 
 function storageAvailable() {
@@ -496,10 +527,10 @@ function wireActions() {
   }));
   $$("[data-mode]").forEach((button) => button.addEventListener("click", () => setMode(button.dataset.mode)));
   $(".mode-tabs").addEventListener("keydown", (event) => {
-    const names = ["trajectories", "field", "force", "density"];
+    const names = $$("[data-mode]").map(button => button.dataset.mode);
     if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
     event.preventDefault();
-    const index = event.key === "Home" ? 0 : event.key === "End" ? 3 : (names.indexOf(mode) + (event.key === "ArrowRight" ? 1 : 3)) % 4;
+    const index = event.key === "Home" ? 0 : event.key === "End" ? names.length - 1 : (names.indexOf(mode) + (event.key === "ArrowRight" ? 1 : names.length - 1)) % names.length;
     setMode(names[index], true);
   });
   $("#force-velocity").addEventListener("change", () => scene?.setForceVelocity?.(forceVelocity()));
@@ -509,14 +540,14 @@ function wireActions() {
   $("#reset-settings").addEventListener("click", () => { replaceParams(DEFAULTS); $("#storage-status").textContent = "已恢复默认参数；保存的设置仍保留"; });
   $("#save-baseline").addEventListener("click", () => {
     if (!result || busy) return;
-    baseline = { params: clone(result.params || params), summary: clone(result.summary) };
+    baseline = { params: clone(result.params || params), summary: clone(result.summary), incidentFluxAtomsPerS: fluorescence.getFlux() };
     updateComparison();
     announce("当前参数与结果已记为基准 A。");
   });
-  $("#restore-baseline").addEventListener("click", () => { if (baseline) replaceParams(baseline.params); });
+  $("#restore-baseline").addEventListener("click", () => { if (baseline) replaceParams(baseline.params, baseline.incidentFluxAtomsPerS); });
   $("#save-settings").addEventListener("click", () => {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, savedAt: new Date().toISOString(), params, linkPowers: $("#link-powers").checked }));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 2, savedAt: new Date().toISOString(), params, incidentFluxAtomsPerS: fluorescence.getFlux(), linkPowers: $("#link-powers").checked }));
       $("#restore-settings").disabled = false;
       $("#storage-status").textContent = "已保存当前参数 · " + new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
     } catch { $("#storage-status").textContent = "保存失败：浏览器未允许本地存储。可导出 JSON 保存参数。"; }
@@ -525,13 +556,14 @@ function wireActions() {
     try {
       const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
       if (!saved?.params) throw new Error("没有可恢复的设置。");
-      replaceParams(saved.params);
+      replaceParams(saved.params, saved.incidentFluxAtomsPerS);
       $("#link-powers").checked = saved.linkPowers !== false;
       $("#storage-status").textContent = "已恢复保存的参数";
     } catch (error) { $("#storage-status").textContent = "恢复失败：" + error.message; }
   });
   $("#export-json").addEventListener("click", () => {
-    const payload = { format: "yb-blue-mot-parameters-v1", exportedAt: new Date().toISOString(), params: clone(params), derived, summary: !busy && result ? result.summary : null, baseline };
+    const payload = { format: "yb-blue-mot-parameters-v1", exportedAt: new Date().toISOString(), params: clone(params), derived,
+      summary: !busy && result ? result.summary : null, fluorescence: fluorescence.exportData(result ? selectedFrame() : 0), baseline };
     const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }));
     const link = document.createElement("a");
     link.href = url;
@@ -543,18 +575,22 @@ function wireActions() {
     $("#storage-status").textContent = "已导出当前参数" + (payload.summary ? "及终态统计" : "；当前计算尚未完成");
   });
   document.addEventListener("visibilitychange", () => { if (document.hidden) setPlaying(false); });
+  window.addEventListener("hashchange", () => { if (location.hash === "#fluorescence") setMode("fluorescence"); });
   reducedMotion.addEventListener("change", () => { if (reducedMotion.matches) setPlaying(false); });
   window.addEventListener("resize", () => scene?.resize());
   window.addEventListener("pagehide", () => { clearTimeout(debounce); worker?.terminate(); cancelAnimationFrame(animationFrame); scene?.destroy(); });
 }
 
 async function initScene() {
+  if (sceneRequested) return;
+  sceneRequested = true;
   try {
+    const { mountScene } = await import("./render.js");
     scene = await mountScene($("#scene-viewport"), {});
     scene.setParams(params, derived, forceVelocity());
     scene.setLayers(selectedLayers());
     scene.setView(view);
-    scene.setMode(mode);
+    if (mode !== "fluorescence") scene.setMode(mode);
     scene.setForceVelocity?.(forceVelocity());
     if (result) { scene.setResult(result); scene.setTime(fraction); }
     $("#scene-loading").hidden = true;
@@ -568,6 +604,7 @@ async function initScene() {
 buildControls();
 syncControls();
 wireActions();
+if (location.hash === "#fluorescence") setMode("fluorescence");
 storageAvailable();
 parametersChanged({ immediate: true });
-initScene();
+if (mode !== "fluorescence") void initScene();

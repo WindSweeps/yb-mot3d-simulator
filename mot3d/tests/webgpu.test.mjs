@@ -24,6 +24,7 @@ async function checkBallistics(gpu) {
   ];
   const params = { ...noLight, n: 3, durationMS: 8, dtUS: 12 };
   const result = await gpu.run(params, { initialStates, frameCount: 19 });
+  check(result.framePhotons.every(value => value === 0), 'No fluorescence with all beams disabled');
   check(result.retained.join() === '1,0,0', 'Continuous hold window');
   check(result.alive.join() === '1,1,0', 'Escape sphere');
   for (let f = 0; f < result.frameCount; f++) {
@@ -50,9 +51,11 @@ async function checkOptics(gpu) {
   const gpuResult = await gpu.run(params, options);
   const positionError = maxDifference(cpu.frames, gpuResult.frames);
   const speedError = maxDifference(cpu.finalVelocities, gpuResult.finalVelocities);
+  const photonError = maxDifference(cpu.framePhotons, gpuResult.framePhotons);
   close(positionError, 0, 1e-6, 'Asymmetric beams and field, position (m)');
   close(speedError, 0, 1e-3, 'Asymmetric beams and field, velocity (m/s)');
-  return { maxPositionErrorM: positionError, maxVelocityErrorMS: speedError };
+  close(photonError, 0, 1, 'Asymmetric beams and field, accumulated photons per atom');
+  return { maxPositionErrorM: positionError, maxVelocityErrorMS: speedError, maxPhotonError: photonError };
 }
 
 async function checkRecoil(gpu) {
@@ -96,8 +99,15 @@ async function benchmark(gpu, n) {
   }
   close(firstGpu.summary.retainedFraction, lastCpu.summary.retainedFraction, .03, 'Default captured fraction');
   close(firstGpu.summary.meanSpeed, lastCpu.summary.meanSpeed, .06, 'Default retained mean speed (m/s)');
+  const finalPhotons = output => output.framePhotons.subarray((output.frameCount - 1) * n)
+    .reduce((sum, value) => sum + value, 0) / n;
+  const gpuPhotonsPerAtom = finalPhotons(firstGpu);
+  const cpuPhotonsPerAtom = finalPhotons(lastCpu);
+  check(cpuPhotonsPerAtom > 0, 'Default MOT emits fluorescence');
+  close(gpuPhotonsPerAtom / cpuPhotonsPerAtom, 1, .03, 'Default fluorescence at the final observation time');
   return {
     n, gpuRetained: firstGpu.summary.retained, cpuRetained: lastCpu.summary.retained,
+    gpuPhotonsPerAtom, cpuPhotonsPerAtom,
     gpuMeanSpeed: firstGpu.summary.meanSpeed, cpuMeanSpeed: lastCpu.summary.meanSpeed,
     medianGpuMS: median(gpuTimes), medianCpuMS: median(cpuTimes), gpuTimes, cpuTimes,
   };
