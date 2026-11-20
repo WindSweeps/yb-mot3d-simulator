@@ -27,6 +27,7 @@ function powerText(watts) {
 export function mountFluorescence(panel, onFluxChange) {
   const {width, height} = FLUORESCENCE_VIEW;
   const input = panel.querySelector('#incident-flux');
+  const details = panel.querySelector('#fluorescence-projection');
   const canvas = panel.querySelector('canvas');
   canvas.width = width;
   canvas.height = height;
@@ -35,8 +36,9 @@ export function mountFluorescence(panel, onFluxChange) {
   const logMinimum = Math.log10(scaleMinimum);
   const logScale = 255 / Math.log10(scaleMaximum / scaleMinimum);
   const empty = panel.querySelector('#fluorescence-empty');
-  const outputs = [...panel.querySelectorAll('output')];
-  let result = null, projection = null, paintedFrame = -1, paintedFlux = null, flux = DEFAULT_FLUX;
+  const emittedOutput = panel.querySelector('#emitted-rate'), powerOutput = panel.querySelector('#emitted-power');
+  const roiOutput = panel.querySelector('#roi-rate'), loadingOutput = panel.querySelector('#loading-rate');
+  let result = null, projection = null, shownFrame = -1, shownFlux = null, paintedFrame = -1, paintedFlux = null, flux = DEFAULT_FLUX;
 
   function setFlux(value) {
     if (!Number.isFinite(value) || value < 0 || value > Number(input.max) * 1e9) throw new RangeError('入射通量超出输入范围。');
@@ -57,10 +59,11 @@ export function mountFluorescence(panel, onFluxChange) {
   function setResult(next) {
     result = next;
     projection = null;
+    shownFrame = -1;
     paintedFrame = -1;
     if (next) return;
     context.clearRect(0, 0, width, height);
-    for (const output of outputs) {
+    for (const output of [emittedOutput, powerOutput, roiOutput, loadingOutput]) {
       output.textContent = '—';
       delete output.dataset.value;
     }
@@ -77,20 +80,23 @@ export function mountFluorescence(panel, onFluxChange) {
     return projection.at(frame, flux, image);
   }
 
+  function writeReading(output, value, text) {
+    output.dataset.value = value;
+    output.textContent = text;
+  }
+
   function show(frame) {
-    if (!result || (frame === paintedFrame && flux === paintedFlux)) return;
-    const values = sample(frame, true);
+    const needImage = details.open && (frame !== paintedFrame || flux !== paintedFlux);
+    if (!result || (!needImage && frame === shownFrame && flux === shownFlux)) return;
+    const values = sample(frame, needImage);
     const {emittedRate, emittedPowerW, roiRate, loadingRate, image} = values;
-    const readings = [
-      [emittedRate, rateText(emittedRate) + ' 光子/s'],
-      [emittedPowerW, powerText(emittedPowerW)],
-      [roiRate, rateText(roiRate) + ' 光子/s'],
-      [loadingRate, rateText(loadingRate) + ' 原子/s'],
-    ];
-    readings.forEach(([value, text], index) => {
-      outputs[index].dataset.value = value;
-      outputs[index].textContent = text;
-    });
+    writeReading(emittedOutput, emittedRate, rateText(emittedRate) + ' 光子/s');
+    writeReading(powerOutput, emittedPowerW, powerText(emittedPowerW));
+    writeReading(loadingOutput, loadingRate, rateText(loadingRate) + ' 原子/s');
+    shownFrame = frame;
+    shownFlux = flux;
+    if (!needImage) return;
+    writeReading(roiOutput, roiRate, rateText(roiRate) + ' 光子/s');
     for (let i = 0; i < image.length; i++) {
       const level = image[i] > 0 ? Math.round(Math.max(0, Math.min(255, (Math.log10(image[i]) - logMinimum) * logScale))) : -1;
       const color = level < 0 ? null : palette[level];
@@ -104,6 +110,10 @@ export function mountFluorescence(panel, onFluxChange) {
     paintedFrame = frame;
     paintedFlux = flux;
   }
+
+  details.addEventListener('toggle', () => {
+    if (details.open && !panel.hidden && shownFrame >= 0) show(shownFrame);
+  });
 
   function exportData(frame) {
     let observation = null;

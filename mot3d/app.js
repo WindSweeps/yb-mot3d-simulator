@@ -22,16 +22,21 @@ let jobId = 0;
 let debounce = 0;
 let baseline = null;
 let fraction = 1;
+let observationTimeS = null;
 let playing = false;
 let lastFrame = null;
 let animationFrame = 0;
 let mode = "trajectories";
 let view = "iso";
 let busy = true;
+let fluorescenceLayerChosen = false;
 const playbackSeconds = 7;
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
-const fluorescence = mountFluorescence($("#fluorescence"), () => {
-  if (result && mode === "fluorescence") fluorescence.show(selectedFrame());
+const fluorescencePanel = $("#fluorescence-readout");
+const fluorescenceLayer = $("#layer-fluorescence");
+const fluorescence = mountFluorescence(fluorescencePanel, () => {
+  scene?.setFluorescenceFlux(fluorescence.getFlux());
+  if (result && !fluorescencePanel.hidden) fluorescence.show(selectedFrame());
 });
 
 const scalarSpecs = [
@@ -268,6 +273,10 @@ function clearMetrics() {
 
 function parametersChanged({ immediate = false } = {}) {
   clearTimeout(debounce);
+  if (result) {
+    const frame = selectedFrame();
+    observationTimeS = frame === result.frameCount - 1 ? null : result.times[frame];
+  }
   jobId += 1;
   if (worker && busy) {
     if (workerBackend === 'CPU') {
@@ -339,7 +348,8 @@ function receiveSimulation(event) {
   result.summary.workerRoundTripMS = performance.now() - runStarted;
   busy = false;
   scene?.setResult(result);
-  showTime(1);
+  const duration = result.times[result.frameCount - 1];
+  showTime(observationTimeS === null ? 1 : Math.min(1, observationTimeS / duration), true);
   showMetrics();
   setStatus("计算完成 · " + result.summary.backend + " · seed " + result.params.seed);
   $("#play").disabled = false;
@@ -378,14 +388,16 @@ function showMetrics() {
   updateComparison();
 }
 
-function showTime(value) {
+function showTime(value, changedResult = false) {
+  const previousFrame = result ? selectedFrame() : -1;
   fraction = Math.max(0, Math.min(1, value));
   $("#timeline").value = String(fraction);
   fillRange($("#timeline"));
-  if (mode !== "fluorescence") scene?.setTime(fraction);
   if (!result) return;
   const frame = selectedFrame();
-  if (mode === "fluorescence") fluorescence.show(frame);
+  if (!changedResult && frame === previousFrame) return;
+  scene?.setTime(frame / (result.frameCount - 1));
+  if (!fluorescencePanel.hidden) fluorescence.show(frame);
   $("#time-output").textContent = format(result.times[frame] * 1000, 1) + " ms";
 }
 
@@ -424,22 +436,23 @@ function updateComparison() {
 function setMode(next, focus = false) {
   mode = next;
   const showsFluorescence = mode === "fluorescence";
-  $("#fluorescence").hidden = !showsFluorescence;
-  $(".scene-card").classList.toggle("fluorescence-active", showsFluorescence);
-  $(".scene-heading h2").textContent = showsFluorescence ? "399 nm 原子荧光" : "三维 MOT";
-  $("#timeline-caption").textContent = showsFluorescence ? "连续开束后的时间 · 观察窗内的瞬时发射率" : "同一批原子的计算轨迹 · 时间轴可拖动";
+  if (showsFluorescence && !fluorescenceLayerChosen && !fluorescenceLayer.checked) {
+    fluorescenceLayer.checked = true;
+    scene?.setLayers(selectedLayers());
+  }
+  $(".scene-heading h2").textContent = showsFluorescence ? "三维 MOT · 原子荧光" : "三维 MOT";
   const descriptions = {
     trajectories: "同一批冷束原子在六束光与磁场中的运动。",
     field: "主四极场与三轴偏置叠加后的磁场线。",
     force: "光加速度：3 mm 箭长对应 5×10⁴ m/s²（平方根刻度，最长 5 mm）；平面视角显示中心切片。",
     density: "当前时刻的热原子云；密度核化平滑用于观察云形与位置。",
-    fluorescence: "六束 MOT 光激发的自发辐射。调节入口通量，查看给定开束时长下的发射率。",
+    fluorescence: "在光束、线圈与冷束轨迹中查看 399 nm 荧光。拖动旋转场景，使用「荧光」开关比较发光区域。",
   };
   $("#mode-description").textContent = descriptions[mode];
   $("#force-velocity-control").hidden = mode !== "force";
   $("#cloud-view").hidden = mode !== "density";
   $("#scene-panel").setAttribute("aria-labelledby", "mode-" + mode);
-  $("#mode-legend").textContent = { trajectories: "原子", field: "磁场线", force: "光力方向", density: "热云密度", fluorescence: "荧光" }[mode];
+  $("#mode-legend").textContent = { trajectories: "原子", field: "磁场线", force: "光力方向", density: "热云密度", fluorescence: "原子" }[mode];
   if (view === "cloud" && mode !== "density") {
     view = "iso";
     scene?.setView(view);
@@ -456,18 +469,20 @@ function setMode(next, focus = false) {
     button.classList.toggle("is-active", selected);
     if (selected && focus) button.focus();
   });
-  if (showsFluorescence) {
-    if (result) fluorescence.show(selectedFrame());
-  } else {
-    if (!sceneRequested) void initScene();
-    scene?.setMode(mode);
-    scene?.setForceVelocity?.(forceVelocity());
-    if (result) scene?.setTime(fraction);
-  }
+  scene?.setMode(mode);
+  updateFluorescencePanel();
 }
 
 function selectedLayers() {
-  return { beams: $("#layer-beams").checked, coils: $("#layer-coils").checked, trails: $("#layer-trails").checked };
+  return { beams: $("#layer-beams").checked, coils: $("#layer-coils").checked, trails: $("#layer-trails").checked, fluorescence: fluorescenceLayer.checked };
+}
+
+function updateFluorescencePanel() {
+  const checked = fluorescenceLayer.checked;
+  fluorescencePanel.hidden = mode !== "fluorescence" && !checked;
+  $("#glow-legend").hidden = !checked;
+  $("#timeline-caption").textContent = checked ? "轨迹显示本批原子的位置 · 荧光来自持续注入的冷束" : "同一批原子的计算轨迹 · 时间轴可拖动";
+  if (result && !fluorescencePanel.hidden) fluorescence.show(selectedFrame());
 }
 
 function restoredParams(saved) {
@@ -495,11 +510,12 @@ function restoredParams(saved) {
 function replaceParams(next, incidentFlux = DEFAULT_FLUX) {
   const restored = restoredParams(next);
   fluorescence.setFlux(incidentFlux);
+  scene?.setFluorescenceFlux(incidentFlux);
   const changed = JSON.stringify(params) !== JSON.stringify(restored);
   params = restored;
   syncControls();
   if (changed || !result) parametersChanged({ immediate: true });
-  else if (mode === "fluorescence") fluorescence.show(selectedFrame());
+  else if (!fluorescencePanel.hidden) fluorescence.show(selectedFrame());
 }
 
 function storageAvailable() {
@@ -516,6 +532,11 @@ function wireActions() {
   $(".calibration-link").addEventListener("click", () => { $("#calibration-details").open = true; });
   $(".basis-link").addEventListener("click", () => { $("#polarization-basis").open = true; });
   ["beams", "coils", "trails"].forEach((layer) => $("#layer-" + layer).addEventListener("change", () => scene?.setLayers(selectedLayers())));
+  fluorescenceLayer.addEventListener("change", () => {
+    fluorescenceLayerChosen = true;
+    scene?.setLayers(selectedLayers());
+    updateFluorescencePanel();
+  });
   $$("[data-view]").forEach((button) => button.addEventListener("click", () => {
     view = button.dataset.view;
     scene?.setView(view);
@@ -547,7 +568,7 @@ function wireActions() {
   $("#restore-baseline").addEventListener("click", () => { if (baseline) replaceParams(baseline.params, baseline.incidentFluxAtomsPerS); });
   $("#save-settings").addEventListener("click", () => {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 2, savedAt: new Date().toISOString(), params, incidentFluxAtomsPerS: fluorescence.getFlux(), linkPowers: $("#link-powers").checked }));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 3, savedAt: new Date().toISOString(), params, incidentFluxAtomsPerS: fluorescence.getFlux(), layers: selectedLayers(), linkPowers: $("#link-powers").checked }));
       $("#restore-settings").disabled = false;
       $("#storage-status").textContent = "已保存当前参数 · " + new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
     } catch { $("#storage-status").textContent = "保存失败：浏览器未允许本地存储。可导出 JSON 保存参数。"; }
@@ -558,12 +579,20 @@ function wireActions() {
       if (!saved?.params) throw new Error("没有可恢复的设置。");
       replaceParams(saved.params, saved.incidentFluxAtomsPerS);
       $("#link-powers").checked = saved.linkPowers !== false;
+      if (saved.layers) {
+        for (const layer of Object.keys(selectedLayers())) {
+          if (typeof saved.layers[layer] === "boolean") $("#layer-" + layer).checked = saved.layers[layer];
+        }
+        fluorescenceLayerChosen = typeof saved.layers.fluorescence === "boolean";
+        scene?.setLayers(selectedLayers());
+        updateFluorescencePanel();
+      }
       $("#storage-status").textContent = "已恢复保存的参数";
     } catch (error) { $("#storage-status").textContent = "恢复失败：" + error.message; }
   });
   $("#export-json").addEventListener("click", () => {
     const payload = { format: "yb-blue-mot-parameters-v1", exportedAt: new Date().toISOString(), params: clone(params), derived,
-      summary: !busy && result ? result.summary : null, fluorescence: fluorescence.exportData(result ? selectedFrame() : 0), baseline };
+      summary: !busy && result ? result.summary : null, fluorescence: fluorescence.exportData(result ? selectedFrame() : 0), display: {mode, view, layers:selectedLayers()}, baseline };
     const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }));
     const link = document.createElement("a");
     link.href = url;
@@ -588,9 +617,10 @@ async function initScene() {
     const { mountScene } = await import("./render.js");
     scene = await mountScene($("#scene-viewport"), {});
     scene.setParams(params, derived, forceVelocity());
+    scene.setFluorescenceFlux(fluorescence.getFlux());
     scene.setLayers(selectedLayers());
     scene.setView(view);
-    if (mode !== "fluorescence") scene.setMode(mode);
+    scene.setMode(mode);
     scene.setForceVelocity?.(forceVelocity());
     if (result) { scene.setResult(result); scene.setTime(fraction); }
     $("#scene-loading").hidden = true;
@@ -607,4 +637,4 @@ wireActions();
 if (location.hash === "#fluorescence") setMode("fluorescence");
 storageAvailable();
 parametersChanged({ immediate: true });
-if (mode !== "fluorescence") void initScene();
+void initScene();

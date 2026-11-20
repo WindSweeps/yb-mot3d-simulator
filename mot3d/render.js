@@ -3,6 +3,8 @@
 import * as THREE from '../anatomy-demo/vendor/three-r160.module.js';
 import { OrbitControls } from '../anatomy-demo/vendor/OrbitControls-r160.js';
 import { compile, fieldAt, opticalAcceleration, BEAM_DIRECTIONS } from './physics.js';
+import { DEFAULT_FLUX } from './fluorescence.js';
+import { createFluorescenceVolume, VOXEL_SIZE_MM } from './fluorescence-volume.js';
 
 const C = { cyan: 0x58d5eb, lime: 0xc1ed79, amber: 0xf4bb69, copper: 0xc68a58, text: '#c8d8e6' };
 const vector = a => new THREE.Vector3(...a);
@@ -27,12 +29,14 @@ export function mountScene(container) {
   controls.maxDistance = 220;
 
   const groups = {};
-  for (const name of ['fixed', 'beams', 'coils', 'source', 'field', 'force', 'trails', 'atoms', 'density', 'densityScale', 'zero']) {
-    groups[name] = new THREE.Group(); scene.add(groups[name]);
+  for (const name of ['fixed', 'beams', 'coils', 'source', 'field', 'force', 'trails', 'atoms', 'density', 'densityScale', 'zero', 'fluorescence']) {
+    groups[name] = new THREE.Group();
+    groups[name].name = `mot-${name}`;
+    scene.add(groups[name]);
   }
   const labels = [];
   let params, derived, compiled, result = null, mode = 'trajectories', fraction = 1, activeView = 'iso';
-  let forceVelocity = [0, 0, 0], layers = { beams: true, coils: true, trails: true };
+  let forceVelocity = [0, 0, 0], layers = { beams: true, coils: true, trails: true, fluorescence: false };
   let disposed = false;
   const disposables = new Set();
   function clear(group) {
@@ -116,6 +120,77 @@ export function mountScene(container) {
   gradient.addColorStop(1, 'rgba(255,255,255,0)'); ctx.fillStyle = gradient; ctx.fillRect(0, 0, 64, 64);
   const radialTexture = new THREE.CanvasTexture(radialCanvas); disposables.add(radialTexture);
 
+  let fluorescenceVolume = null, fluorescenceFrame = -1, fluorescenceFlux = DEFAULT_FLUX;
+  const fluorescenceMaterial = new THREE.ShaderMaterial({
+    uniforms: {
+      fluxPerAtom: { value: 0 }, pixelRatio: { value: renderer.getPixelRatio() },
+      viewportHeight: { value: 1 }, diameterMM: { value: 1.8 * VOXEL_SIZE_MM },
+    },
+    vertexShader: `
+      attribute float photons;
+      uniform float fluxPerAtom, pixelRatio, viewportHeight, diameterMM;
+      varying float emission;
+      void main() {
+        // 固定亮度映射。1e10 photons/s/体素对应映射中点，整个回放共用同一标度。
+        float amplitude = pow(max(0.0, photons * fluxPerAtom * 1e-10), 0.45);
+        emission = amplitude / (1.0 + amplitude);
+        vec4 viewPosition = modelViewMatrix * vec4(position, 1.0);
+        gl_Position = projectionMatrix * viewPosition;
+        float diameter = diameterMM * projectionMatrix[1][1] * viewportHeight * 0.5 / max(-viewPosition.z, 0.01);
+        gl_PointSize = clamp(diameter, 2.0 * pixelRatio, 48.0 * pixelRatio);
+      }`,
+    fragmentShader: `
+      varying float emission;
+      void main() {
+        vec2 offset = 2.0 * gl_PointCoord - 1.0;
+        float r2 = dot(offset, offset);
+        if (r2 >= 1.0) discard;
+        float glow = exp(-3.0 * r2) * (1.0 - r2);
+        gl_FragColor = vec4(0.73, 0.70, 1.0, emission * glow);
+      }`,
+    transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
+  });
+  function emptyFluorescenceGeometry() {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(0), 3));
+    geometry.setAttribute('photons', new THREE.BufferAttribute(new Float32Array(0), 1));
+    geometry.setDrawRange(0, 0);
+    return geometry;
+  }
+  const emissionPoints = new THREE.Points(emptyFluorescenceGeometry(), fluorescenceMaterial);
+  emissionPoints.name = 'mot-fluorescence-voxels';
+  emissionPoints.frustumCulled = false;
+  emissionPoints.renderOrder = 2;
+  groups.fluorescence.add(emissionPoints);
+
+  function updateFluorescence() {
+    const geometry = emissionPoints.geometry;
+    const f = result ? Math.round(fraction * (result.frameCount - 1)) : 0;
+    fluorescenceMaterial.uniforms.fluxPerAtom.value = result ? fluorescenceFlux / result.n : 0;
+    if (!groups.fluorescence.visible || !fluorescenceFlux || !f) {
+      geometry.setDrawRange(0, 0);
+      return;
+    }
+    if (!fluorescenceVolume) {
+      fluorescenceVolume = createFluorescenceVolume(result);
+      geometry.setAttribute('position', new THREE.BufferAttribute(fluorescenceVolume.positions, 3));
+      geometry.setAttribute('photons', new THREE.BufferAttribute(fluorescenceVolume.photons, 1).setUsage(THREE.DynamicDrawUsage));
+    }
+    const count = fluorescenceVolume.at(f);
+    if (fluorescenceFrame !== f) {
+      geometry.attributes.photons.needsUpdate = true;
+      fluorescenceFrame = f;
+    }
+    geometry.setDrawRange(0, count);
+  }
+  function setFluorescenceFlux(value) {
+    if (!Number.isFinite(value) || value < 0) throw new RangeError('入射通量必须为非负有限数。');
+    if (fluorescenceFlux === value) return;
+    fluorescenceFlux = value;
+    updateFluorescence();
+    draw();
+  }
+
   function buildCoils() {
     clear(groups.coils);
     const main = params.mainAxis === 'z' ? [0, 0, 1] : [0, 1, 0];
@@ -167,7 +242,7 @@ export function mountScene(container) {
     clear(groups.zero);
     if (!derived.zeroUnique || !derived.zeroMM || Math.max(...derived.zeroMM.map(Math.abs)) > 48) return;
     const p = derived.zeroMM;
-    const small = mode === 'density' && activeView === 'cloud', half = small ? .16 : 1.5, offset = small ? .65 : 2;
+    const small = activeView === 'cloud', half = small ? .16 : 1.5, offset = small ? .65 : 2;
     for (let j = 0; j < 3; j++) line([p.map((v, i) => v - (i === j ? half : 0)), p.map((v, i) => v + (i === j ? half : 0))], 0xffffff, groups.zero, .7);
     label('B = 0', [p[0] + offset, p[1], p[2] + offset], groups.zero, '#ffffff');
   }
@@ -219,22 +294,30 @@ export function mountScene(container) {
       arrow(s.pos, s.a, Math.min(5, 3 * Math.sqrt(s.norm / 50000)), C.lime, groups.force, .85, .9);
   }
   function setMode(next) {
-    const changed = mode !== next; mode = next; updateVisibility();
+    const changed = mode !== next;
+    const keepOrbit = ['trajectories', 'fluorescence'].includes(mode) && ['trajectories', 'fluorescence'].includes(next);
+    mode = next; updateVisibility();
     if (changed && compiled && mode === 'field') buildField();
-    if (changed) setView(activeView); else draw();
+    if (changed && !keepOrbit) setView(activeView); else draw();
   }
   function updateVisibility() {
+    const showTrajectories = mode === 'trajectories' || mode === 'fluorescence';
     groups.beams.visible = layers.beams && mode !== 'density';
     groups.coils.visible = layers.coils && mode !== 'density';
     groups.field.visible = mode === 'field'; groups.force.visible = mode === 'force';
-    groups.trails.visible = layers.trails && mode === 'trajectories';
-    groups.atoms.visible = mode === 'trajectories'; groups.density.visible = mode === 'density';
-    groups.densityScale.visible = mode === 'density' && activeView === 'cloud';
+    groups.trails.visible = layers.trails && showTrajectories;
+    groups.atoms.visible = showTrajectories; groups.density.visible = mode === 'density';
+    groups.fluorescence.visible = layers.fluorescence;
+    groups.densityScale.visible = activeView === 'cloud';
     groups.source.visible = mode !== 'density';
   }
   let points = null, densityPoints = null;
   function setResult(next) {
+    if (result === next) return;
     result = next; clear(groups.atoms); clear(groups.density); clear(groups.densityScale); clear(groups.trails); points = densityPoints = null;
+    fluorescenceVolume = null; fluorescenceFrame = -1;
+    emissionPoints.geometry.dispose();
+    emissionPoints.geometry = emptyFluorescenceGeometry();
     if (result) {
       const g = new THREE.BufferGeometry();
       g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(result.n * 3), 3));
@@ -245,8 +328,8 @@ export function mountScene(container) {
       densityPoints = new THREE.Points(dg, new THREE.PointsMaterial({ size: .6, color: C.cyan, map: radialTexture, transparent: true,
         opacity: .06, depthWrite: false, blending: THREE.AdditiveBlending }));
       groups.density.add(densityPoints);
-      if (result.summary.centroidMM) {
-        const c = result.summary.centroidMM, start = [c[0] - .5, c[1] - .8, c[2] - .8];
+      {
+        const c = result.summary.centroidMM ?? [0, 0, 0], start = [c[0] - .5, c[1] - .8, c[2] - .8];
         line([start, [start[0] + 1, start[1], start[2]]], 0xc8d8e6, groups.densityScale);
         label('1 mm', [start[0] + .5, start[1], start[2] - .12], groups.densityScale);
       }
@@ -284,6 +367,7 @@ export function mountScene(container) {
       // Replays only the already traversed part of each computed trajectory.
       groups.trails.children.forEach(l => l.geometry.setDrawRange(0, Math.max(1, f + 1)));
     }
+    updateFluorescence();
     draw();
   }
   function setParams(next, d, velocity = forceVelocity) {
@@ -314,7 +398,7 @@ export function mountScene(container) {
   }
   function setView(view) {
     activeView = view;
-    const center = view === 'cloud' && result?.summary.centroidMM ? vector(result.summary.centroidMM) : new THREE.Vector3(-4, 0, 0);
+    const center = view === 'cloud' ? vector(result?.summary.centroidMM ?? [0, 0, 0]) : new THREE.Vector3(-4, 0, 0);
     const offsets = { iso: [61, -79, 55], xy: [0, 0, 110], xz: [0, -110, 0], yz: [110, 0, 0], cloud: [3, -4.3, 3] };
     camera.up.set(0, 0, 1); if (view === 'xy') camera.up.set(0, 1, 0);
     if (mode === 'force') center.set(0, 0, 0);
@@ -329,13 +413,14 @@ export function mountScene(container) {
   function resize() {
     const w = Math.max(1, container.clientWidth), h = Math.max(1, container.clientHeight);
     renderer.setSize(w, h, false); camera.aspect = w / h;
+    fluorescenceMaterial.uniforms.viewportHeight.value = h * renderer.getPixelRatio();
     camera.fov = 2 * Math.atan(Math.tan(18 * Math.PI / 180) * Math.max(1, 1.45 / camera.aspect)) * 180 / Math.PI;
     camera.updateProjectionMatrix(); draw();
   }
   const observer = new ResizeObserver(resize); observer.observe(container);
   controls.addEventListener('change', draw); setView('iso'); resize();
-  return { setParams, setResult, setTime, setView, setMode, setForceVelocity,
-    setLayers(v) { layers = { ...layers, ...v }; updateVisibility(); draw(); }, resize,
+  return { setParams, setResult, setTime, setView, setMode, setForceVelocity, setFluorescenceFlux,
+    setLayers(v) { layers = { ...layers, ...v }; updateVisibility(); updateFluorescence(); draw(); }, resize,
     destroy() { disposed = true; observer.disconnect(); controls.dispose(); Object.values(groups).forEach(clear);
       disposables.forEach(o => o.dispose()); renderer.dispose(); renderer.domElement.remove(); overlay.remove(); } };
 }
