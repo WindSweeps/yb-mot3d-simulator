@@ -23,7 +23,7 @@ for (const frame of [0, 9, 3, 11, 4, 1, 0, 11]) {
   assert.equal(checkConservation(volume, result, frame), frame === 0 ? 0 : 4);
   for (let atom = 0; atom < 4; atom++) {
     close(volume.photons[atom], result.framePhotons[frame * 4 + atom]);
-    for (let k = 0; k < 3; k++) close(volume.positions[3 * atom + k], 1000 * positions[atom][k], .063);
+    for (let k = 0; k < 3; k++) close(volume.positions[3 * atom + k], 1000 * positions[atom][k]);
   }
 }
 const dark = simulate({ ...params, powersMW: Array(6).fill(0) }, { initialStates, frameCount: 12 });

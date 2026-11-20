@@ -131,7 +131,7 @@ export function mountScene(container) {
       uniform float fluxPerAtom, pixelRatio, viewportHeight, diameterMM;
       varying float emission;
       void main() {
-        // 固定亮度映射。1e10 photons/s/体素对应映射中点，整个回放共用同一标度。
+        // Fixed scale: 1e10 photons/s in one voxel gives half brightness.
         float amplitude = pow(max(0.0, photons * fluxPerAtom * 1e-10), 0.45);
         emission = amplitude / (1.0 + amplitude);
         vec4 viewPosition = modelViewMatrix * vec4(position, 1.0);
