@@ -24,6 +24,8 @@ let baseline = null;
 let fraction = 1;
 let observationTimeS = null;
 let playing = false;
+let demoVisited = false;
+let autoDemoPending = false;
 let lastFrame = null;
 let animationFrame = 0;
 let mode = "trajectories";
@@ -273,6 +275,7 @@ function clearMetrics() {
 
 function parametersChanged({ immediate = false } = {}) {
   clearTimeout(debounce);
+  if (jobId > 0) autoDemoPending = false;
   if (result) {
     const frame = selectedFrame();
     observationTimeS = frame === result.frameCount - 1 ? null : result.times[frame];
@@ -357,6 +360,7 @@ function receiveSimulation(event) {
   $("#save-baseline").disabled = false;
   $("#simulation-error").hidden = true;
   announce("计算完成，留存 " + result.summary.retained + " / " + result.n + " 个原子。");
+  startPendingDemo();
 }
 
 function radius(summary) {
@@ -393,6 +397,7 @@ function showTime(value, changedResult = false) {
   fraction = Math.max(0, Math.min(1, value));
   $("#timeline").value = String(fraction);
   fillRange($("#timeline"));
+  if (changedResult || value === 0 || value === 1 || !playing) updatePlaybackButton();
   if (!result) return;
   const frame = selectedFrame();
   if (!changedResult && frame === previousFrame) return;
@@ -404,15 +409,45 @@ function showTime(value, changedResult = false) {
 function setPlaying(value) {
   playing = Boolean(value && result);
   $("#play").setAttribute("aria-pressed", String(playing));
-  $("#play span").textContent = playing ? "暂停" : "回放";
+  updatePlaybackButton();
   lastFrame = null;
   cancelAnimationFrame(animationFrame);
   if (playing) animationFrame = requestAnimationFrame(playbackTick);
 }
 
+function updatePlaybackButton() {
+  const middle = fraction > 0 && fraction < 1;
+  $("#play span").textContent = playing ? "暂停" : middle ? "继续演示" : fraction === 0 ? "播放演示" : "重播演示";
+  $("#restart-demo").hidden = !result || !(middle || playing);
+}
+
+function restartDemo() {
+  autoDemoPending = false;
+  showTime(0);
+  setPlaying(true);
+}
+
+function startPendingDemo() {
+  if (autoDemoPending && scene && result && !document.hidden) restartDemo();
+}
+
+function openSceneLink() {
+  const demo = location.hash === "#demo";
+  autoDemoPending = demo && !demoVisited && !reducedMotion.matches;
+  if (demo) demoVisited = true;
+  if (demo || location.hash === "#fluorescence") setMode("fluorescence");
+  startPendingDemo();
+}
+
 function playbackTick(now) {
   if (!playing || !result) return;
-  if (lastFrame !== null) showTime(fraction + Math.min(now - lastFrame, 100) / (playbackSeconds * 1000));
+  if (lastFrame !== null) {
+    const elapsed = Math.min(now - lastFrame, 100) / (playbackSeconds * 1000);
+    const progress = Math.min(1, Math.sqrt(fraction) + elapsed);
+    const next = progress * progress;
+    const finalFrame = result.frameCount - 1;
+    showTime(Math.round(next * finalFrame) === finalFrame ? 1 : next);
+  }
   lastFrame = now;
   if (fraction >= 1) { setPlaying(false); return; }
   animationFrame = requestAnimationFrame(playbackTick);
@@ -436,6 +471,7 @@ function updateComparison() {
 function setMode(next, focus = false) {
   mode = next;
   const showsFluorescence = mode === "fluorescence";
+  if (!showsFluorescence) autoDemoPending = false;
   if (showsFluorescence && !fluorescenceLayerChosen && !fluorescenceLayer.checked) {
     fluorescenceLayer.checked = true;
     scene?.setLayers(selectedLayers());
@@ -446,14 +482,15 @@ function setMode(next, focus = false) {
     field: "主四极场与三轴偏置叠加后的磁场线。",
     force: "光加速度：3 mm 箭长对应 5×10⁴ m/s²（平方根刻度，最长 5 mm）；平面视角显示中心切片。",
     density: "当前时刻的热原子云；密度核化平滑用于观察云形与位置。",
-    fluorescence: "在光束、线圈与冷束轨迹中查看 399 nm 荧光。拖动旋转场景，使用「荧光」开关比较发光区域。",
+    fluorescence: "重播冷束进入六束光交点的过程。入射余迹逐渐消退，留存原子在阱中继续发出 399 nm 荧光。",
   };
   $("#mode-description").textContent = descriptions[mode];
   $("#force-velocity-control").hidden = mode !== "force";
-  $("#cloud-view").hidden = mode !== "density";
+  const cloudViewAvailable = showsFluorescence || mode === "density";
+  $("#cloud-view").hidden = !cloudViewAvailable;
   $("#scene-panel").setAttribute("aria-labelledby", "mode-" + mode);
   $("#mode-legend").textContent = { trajectories: "原子", field: "磁场线", force: "光力方向", density: "热云密度", fluorescence: "原子" }[mode];
-  if (view === "cloud" && mode !== "density") {
+  if (view === "cloud" && !cloudViewAvailable) {
     view = "iso";
     scene?.setView(view);
     $$("[data-view]").forEach((button) => {
@@ -481,7 +518,7 @@ function updateFluorescencePanel() {
   const checked = fluorescenceLayer.checked;
   fluorescencePanel.hidden = mode !== "fluorescence" && !checked;
   $("#glow-legend").hidden = !checked;
-  $("#timeline-caption").textContent = checked ? "轨迹显示本批原子的位置 · 荧光来自持续注入的冷束" : "同一批原子的计算轨迹 · 时间轴可拖动";
+  $("#timeline-caption").textContent = checked ? "入射阶段慢放。三维余迹逐渐消退，下方读数按连续入射计算。" : "入射阶段慢放，时间轴标注实际模拟时刻。";
   if (result && !fluorescencePanel.hidden) fluorescence.show(selectedFrame());
 }
 
@@ -555,8 +592,13 @@ function wireActions() {
     setMode(names[index], true);
   });
   $("#force-velocity").addEventListener("change", () => scene?.setForceVelocity?.(forceVelocity()));
-  $("#play").addEventListener("click", () => { if (!playing && fraction >= 1) showTime(0); setPlaying(!playing); });
-  $("#timeline").addEventListener("input", (event) => { setPlaying(false); showTime(Number(event.target.value)); });
+  $("#play").addEventListener("click", () => {
+    autoDemoPending = false;
+    if (!playing && fraction >= 1) restartDemo();
+    else setPlaying(!playing);
+  });
+  $("#restart-demo").addEventListener("click", restartDemo);
+  $("#timeline").addEventListener("input", (event) => { autoDemoPending = false; setPlaying(false); showTime(Number(event.target.value)); });
   $("#retry").addEventListener("click", () => parametersChanged({ immediate: true }));
   $("#reset-settings").addEventListener("click", () => { replaceParams(DEFAULTS); $("#storage-status").textContent = "已恢复默认参数；保存的设置仍保留"; });
   $("#save-baseline").addEventListener("click", () => {
@@ -603,9 +645,12 @@ function wireActions() {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     $("#storage-status").textContent = "已导出当前参数" + (payload.summary ? "及终态统计" : "；当前计算尚未完成");
   });
-  document.addEventListener("visibilitychange", () => { if (document.hidden) setPlaying(false); });
-  window.addEventListener("hashchange", () => { if (location.hash === "#fluorescence") setMode("fluorescence"); });
-  reducedMotion.addEventListener("change", () => { if (reducedMotion.matches) setPlaying(false); });
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) setPlaying(false);
+    else startPendingDemo();
+  });
+  window.addEventListener("hashchange", openSceneLink);
+  reducedMotion.addEventListener("change", () => { if (reducedMotion.matches) { autoDemoPending = false; setPlaying(false); } });
   window.addEventListener("resize", () => scene?.resize());
   window.addEventListener("pagehide", () => { clearTimeout(debounce); worker?.terminate(); cancelAnimationFrame(animationFrame); scene?.destroy(); });
 }
@@ -625,6 +670,7 @@ async function initScene() {
     if (result) { scene.setResult(result); scene.setTime(fraction); }
     $("#scene-loading").hidden = true;
     scene.resize();
+    startPendingDemo();
   } catch (error) {
     $("#scene-loading").classList.add("is-error");
     $("#scene-loading").replaceChildren(element("span", "", "三维视图未能建立：" + error.message));
@@ -634,7 +680,7 @@ async function initScene() {
 buildControls();
 syncControls();
 wireActions();
-if (location.hash === "#fluorescence") setMode("fluorescence");
+openSceneLink();
 storageAvailable();
 parametersChanged({ immediate: true });
 void initScene();

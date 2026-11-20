@@ -85,7 +85,7 @@
 
       <section class="result-workspace" id="scene-section" aria-label="三维场景与计算结果">
         <div class="scene-card" id="fluorescence">
-          <div class="mode-tabs" role="tablist" aria-label="显示物理量">
+          <div class="mode-tabs" id="demo" role="tablist" aria-label="显示物理量">
             <button id="mode-trajectories" class="mode-tab is-active" role="tab" data-mode="trajectories" aria-controls="scene-panel" aria-selected="true" tabindex="0">原子轨迹</button>
             <button id="mode-field" class="mode-tab" role="tab" data-mode="field" aria-controls="scene-panel" aria-selected="false" tabindex="-1">磁场线</button>
             <button id="mode-force" class="mode-tab" role="tab" data-mode="force" aria-controls="scene-panel" aria-selected="false" tabindex="-1">光力</button>
@@ -108,8 +108,8 @@
             </div>
             <div class="legend"><span><i class="atom-dot" aria-hidden="true"></i><span id="mode-legend">原子</span></span><span><i class="field-dot" aria-hidden="true"></i>磁场零点</span><span id="glow-legend" hidden><i class="glow-dot" aria-hidden="true"></i>399 nm 荧光</span></div>
           </div>
-          <div class="timeline-bar"><button id="play" class="play-button" aria-pressed="false" disabled><svg class="play-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7Z"/></svg><svg class="pause-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14"/></svg><span>回放</span></button><div class="timeline-control"><label class="sr-only" for="timeline">回放时间</label><input id="timeline" type="range" min="0" max="1" step="0.001" value="1" disabled><div class="timeline-endpoints"><span>0</span><span id="duration-label">20 ms</span></div></div><output id="time-output" class="time-output">— ms</output></div>
-          <div class="scene-caption"><span id="timeline-caption">同一批原子的计算轨迹 · 时间轴可拖动</span><span id="compute-time"></span></div>
+          <div class="timeline-bar"><button id="play" class="play-button" aria-pressed="false" disabled><svg class="play-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7Z"/></svg><svg class="pause-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14"/></svg><span>重播演示</span></button><div class="timeline-control"><label class="sr-only" for="timeline">演示时间</label><input id="timeline" type="range" min="0" max="1" step="0.001" value="1" disabled><div class="timeline-endpoints"><span>0</span><span id="duration-label">20 ms</span></div></div><output id="time-output" class="time-output">— ms</output></div>
+          <div class="scene-caption"><div class="playback-info"><span id="timeline-caption">入射阶段慢放，时间轴标注实际模拟时刻。</span><button id="restart-demo" class="text-button" hidden>从头重播</button></div><span id="compute-time"></span></div>
           <section id="fluorescence-readout" aria-label="连续注入的原子荧光" hidden>
               <div class="flux-row">
                 <label for="incident-flux">¹⁷⁴Yb 入射通量 Φ</label>
@@ -121,7 +121,7 @@
                 <div><dt>预计加载率 · 末窗留存</dt><dd><output id="loading-rate">—</output></dd></div>
               </dl>
               <details id="fluorescence-projection">
-                <summary>荧光二维投影 <span>XZ 平面 · 沿 Y 轴观察</span></summary>
+                <summary>连续入射荧光的二维投影 <span>XZ 平面 · 沿 Y 轴观察</span></summary>
                 <figure class="fluorescence-figure" aria-label="荧光发射分布">
                 <div class="fluorescence-map">
                   <div class="z-ticks" aria-hidden="true"><span>+14</span><span>Z / mm</span><span>−14</span></div>
@@ -138,7 +138,7 @@
               </figure>
                 <div class="inline-readout"><span>视野内发射率 · 0.25 mm 像素</span><output id="roi-rate">—</output></div>
               </details>
-              <p class="fluorescence-note">从空阱开始连续注入 ¹⁷⁴Yb，叠加留存和飞越原子的荧光。三维亮度按固定的非线性刻度显示局部发射率。发射率和功率按全立体角（4π）计算，相机计数还取决于光学收集效率和量子效率。预计加载率等于入口通量乘以本批原子的末窗留存比例。</p>
+              <p class="fluorescence-note">这些读数和二维投影从空阱开始，按连续通量叠加留存与飞越原子的发射。发射率和功率按全立体角（4π）计算，相机计数还取决于光学收集效率和量子效率。预计加载率等于入口通量乘以本批原子的末窗留存比例。</p>
           </section>
         </div>
 
@@ -206,7 +206,7 @@
             <p id="polarization-citations" class="basis-citations"><a href="https://physics.nist.gov/PhysRefData/Handbook/Tables/ytterbiumtable5.htm" target="_blank" rel="noopener">NIST · Yb 能级表</a><a href="https://arxiv.org/pdf/1912.08065#page=2" target="_blank" rel="noopener">Lauprêtre 等 · 399 nm 光谱</a><a href="https://arxiv.org/pdf/1409.0244#page=4" target="_blank" rel="noopener">Tarbutt · Zeeman 项与偏振选择定则</a><a href="./reports/2026-10-30-source-polarization/REPORT.md" target="_blank" rel="noopener">40 m/s 冷束重算与偏振核查 ↗</a></p>
           </div>
         </details>
-        <details class="method-details"><summary><span>模型与参数说明</span><span class="summary-value">半经典光力 + 随机反冲</span></summary><div class="method-content"><p>逐步积分六束 Gaussian 光的散射力、四极场 Zeeman 位移与重力；用随机光子反冲描述动量扩散。偏置磁场移动零场位置，功率不平衡改变各向散射力。</p><p>线圈换算系数当前为可编辑示例，默认冷束初态也在左栏设置。指标取模拟结束时的留存集合；回放只改变显示时刻。</p><p><a href="./METHOD.md" target="_blank" rel="noopener">查看模型、参考资料与验证记录 ↗</a></p></div></details>
+        <details class="method-details"><summary><span>模型与参数说明</span><span class="summary-value">半经典光力 + 随机反冲</span></summary><div class="method-content"><p>逐步积分六束 Gaussian 光的散射力、四极场 Zeeman 位移与重力，用随机光子反冲描述动量扩散。偏置磁场移动零场位置，功率不平衡改变各向散射力。</p><p>左栏可设置线圈标定系数与冷束初态。留存比例、平均速率和云半径取自末态留存集合。回放时，三维演示和连续入射的荧光读数使用同一条模拟时间轴。</p><p><a href="./METHOD.md" target="_blank" rel="noopener">查看模型、参考资料与验证记录 ↗</a></p></div></details>
         <div class="bottom-actions"><span id="storage-status" role="status" aria-live="polite">设置仅保存在本机浏览器</span><button id="export-json" class="text-button">导出参数 JSON ↓</button></div>
       </section>
     </div>

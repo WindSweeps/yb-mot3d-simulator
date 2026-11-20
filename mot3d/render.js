@@ -4,7 +4,7 @@ import * as THREE from '../anatomy-demo/vendor/three-r160.module.js';
 import { OrbitControls } from '../anatomy-demo/vendor/OrbitControls-r160.js';
 import { compile, fieldAt, opticalAcceleration, BEAM_DIRECTIONS } from './physics.js';
 import { DEFAULT_FLUX } from './fluorescence.js';
-import { createFluorescenceVolume, VOXEL_SIZE_MM } from './fluorescence-volume.js';
+import { createFluorescenceVolume, recentWindow, screenFade } from './fluorescence-volume.js';
 
 const C = { cyan: 0x58d5eb, lime: 0xc1ed79, amber: 0xf4bb69, copper: 0xc68a58, text: '#c8d8e6' };
 const vector = a => new THREE.Vector3(...a);
@@ -23,6 +23,7 @@ export function mountScene(container) {
   Object.assign(overlay.style, { position: 'absolute', inset: '0', pointerEvents: 'none', overflow: 'hidden' });
   container.append(overlay);
   const controls = new OrbitControls(camera, renderer.domElement);
+  const cloudFocus = new THREE.Vector3();
   controls.target.set(-4, 0, 0);
   controls.enableDamping = false;
   controls.minDistance = 2;
@@ -121,23 +122,25 @@ export function mountScene(container) {
   const radialTexture = new THREE.CanvasTexture(radialCanvas); disposables.add(radialTexture);
 
   let fluorescenceVolume = null, fluorescenceFrame = -1, fluorescenceFlux = DEFAULT_FLUX;
-  const fluorescenceMaterial = new THREE.ShaderMaterial({
+  let currentFrame = -1, motionFade = 0, motionSince = 0, fadeTimer = 0, fadeAnimation = 0;
+  function emissionPoints(name, diameterMM, minimumPixels) {
+    const material = new THREE.ShaderMaterial({
     uniforms: {
-      fluxPerAtom: { value: 0 }, pixelRatio: { value: renderer.getPixelRatio() },
-      viewportHeight: { value: 1 }, diameterMM: { value: 1.8 * VOXEL_SIZE_MM },
+      intensityScale: { value: 1 }, sampleWeight: { value: 1 }, fade: { value: 1 },
+      pixelRatio: { value: renderer.getPixelRatio() }, viewportHeight: { value: 1 },
+      diameterMM: { value: diameterMM }, minimumPixels: { value: minimumPixels },
     },
     vertexShader: `
-      attribute float photons;
-      uniform float fluxPerAtom, pixelRatio, viewportHeight, diameterMM;
+      attribute float rate, weight;
+      uniform float intensityScale, sampleWeight, fade, pixelRatio, viewportHeight, diameterMM, minimumPixels;
       varying float emission;
       void main() {
-        // Fixed scale: 1e10 photons/s in one voxel gives half brightness.
-        float amplitude = pow(max(0.0, photons * fluxPerAtom * 1e-10), 0.45);
-        emission = amplitude / (1.0 + amplitude);
+        float amplitude = max(0.0, rate * intensityScale * 1e-7);
+        emission = fade * weight * sampleWeight * amplitude / (1.0 + amplitude);
         vec4 viewPosition = modelViewMatrix * vec4(position, 1.0);
         gl_Position = projectionMatrix * viewPosition;
         float diameter = diameterMM * projectionMatrix[1][1] * viewportHeight * 0.5 / max(-viewPosition.z, 0.01);
-        gl_PointSize = clamp(diameter, 2.0 * pixelRatio, 48.0 * pixelRatio);
+        gl_PointSize = clamp(diameter, minimumPixels * pixelRatio, 60.0 * pixelRatio);
       }`,
     fragmentShader: `
       varying float emission;
@@ -149,45 +152,56 @@ export function mountScene(container) {
         gl_FragColor = vec4(0.73, 0.70, 1.0, emission * glow);
       }`,
     transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
-  });
-  function emptyFluorescenceGeometry() {
+    });
     const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(0), 3));
-    geometry.setAttribute('photons', new THREE.BufferAttribute(new Float32Array(0), 1));
     geometry.setDrawRange(0, 0);
-    return geometry;
+    const obj = new THREE.Points(geometry, material);
+    obj.name = name;
+    obj.frustumCulled = false;
+    obj.renderOrder = 2;
+    groups.fluorescence.add(obj);
+    return obj;
   }
-  const emissionPoints = new THREE.Points(emptyFluorescenceGeometry(), fluorescenceMaterial);
-  emissionPoints.name = 'mot-fluorescence-voxels';
-  emissionPoints.frustumCulled = false;
-  emissionPoints.renderOrder = 2;
-  groups.fluorescence.add(emissionPoints);
-
+  const cloudLight = emissionPoints('mot-fluorescence-cloud', .34, 6);
+  const flybyLight = emissionPoints('mot-fluorescence-transient', .32, 3.5);
+  function uploadEmission(obj, data) {
+    if (obj.geometry.attributes.position?.array !== data.positions) {
+      obj.geometry.dispose();
+      obj.geometry = new THREE.BufferGeometry();
+      for (const [name, array, size] of [['position', data.positions, 3], ['rate', data.rates, 1], ['weight', data.weights, 1]])
+        obj.geometry.setAttribute(name, new THREE.BufferAttribute(array, size).setUsage(THREE.DynamicDrawUsage));
+    }
+    for (const attr of Object.values(obj.geometry.attributes)) {
+      attr.clearUpdateRanges();
+      if (data.count) { attr.addUpdateRange(0, data.count * attr.itemSize); attr.needsUpdate = true; }
+    }
+    obj.geometry.setDrawRange(0, data.count);
+  }
   function updateFluorescence() {
-    const geometry = emissionPoints.geometry;
-    const f = result ? Math.round(fraction * (result.frameCount - 1)) : 0;
-    fluorescenceMaterial.uniforms.fluxPerAtom.value = result ? fluorescenceFlux / result.n : 0;
-    if (!groups.fluorescence.visible || !fluorescenceFlux || !f) {
-      geometry.setDrawRange(0, 0);
+    for (const obj of [cloudLight, flybyLight]) {
+      obj.material.uniforms.intensityScale.value = fluorescenceFlux / DEFAULT_FLUX;
+      obj.material.uniforms.sampleWeight.value = result ? 64 / result.n : 0;
+    }
+    if (!groups.fluorescence.visible || !fluorescenceFlux || currentFrame <= 0) {
+      cloudLight.geometry.setDrawRange(0, 0);
+      flybyLight.geometry.setDrawRange(0, 0);
+      fluorescenceFrame = -1;
       return;
     }
-    if (!fluorescenceVolume) {
-      fluorescenceVolume = createFluorescenceVolume(result);
-      geometry.setAttribute('position', new THREE.BufferAttribute(fluorescenceVolume.positions, 3));
-      geometry.setAttribute('photons', new THREE.BufferAttribute(fluorescenceVolume.photons, 1).setUsage(THREE.DynamicDrawUsage));
+    if (fluorescenceFrame !== currentFrame) {
+      fluorescenceVolume.at(currentFrame, motionFade > 0);
+      uploadEmission(cloudLight, fluorescenceVolume.cloud);
+      uploadEmission(flybyLight, fluorescenceVolume.transient);
+      fluorescenceFrame = currentFrame;
     }
-    const count = fluorescenceVolume.at(f);
-    if (fluorescenceFrame !== f) {
-      geometry.attributes.photons.needsUpdate = true;
-      fluorescenceFrame = f;
-    }
-    geometry.setDrawRange(0, count);
+    if (motionFade === 0) flybyLight.geometry.setDrawRange(0, 0);
   }
   function setFluorescenceFlux(value) {
     if (!Number.isFinite(value) || value < 0) throw new RangeError('入射通量必须为非负有限数。');
     if (fluorescenceFlux === value) return;
     fluorescenceFlux = value;
     updateFluorescence();
+    scheduleFade();
     draw();
   }
 
@@ -242,9 +256,9 @@ export function mountScene(container) {
     clear(groups.zero);
     if (!derived.zeroUnique || !derived.zeroMM || Math.max(...derived.zeroMM.map(Math.abs)) > 48) return;
     const p = derived.zeroMM;
-    const small = activeView === 'cloud', half = small ? .16 : 1.5, offset = small ? .65 : 2;
+    const small = activeView === 'cloud', half = small ? .16 : 1.5;
     for (let j = 0; j < 3; j++) line([p.map((v, i) => v - (i === j ? half : 0)), p.map((v, i) => v + (i === j ? half : 0))], 0xffffff, groups.zero, .7);
-    label('B = 0', [p[0] + offset, p[1], p[2] + offset], groups.zero, '#ffffff');
+    label('B = 0', p, groups.zero, '#ffffff');
   }
   function buildField() {
     clear(groups.field);
@@ -295,10 +309,14 @@ export function mountScene(container) {
   }
   function setMode(next) {
     const changed = mode !== next;
-    const keepOrbit = ['trajectories', 'fluorescence'].includes(mode) && ['trajectories', 'fluorescence'].includes(next);
-    mode = next; updateVisibility();
+    const sharedViews = activeView === 'cloud' ? ['density', 'fluorescence'] : ['trajectories', 'fluorescence'];
+    const keepOrbit = sharedViews.includes(mode) && sharedViews.includes(next);
+    mode = next;
+    if (motionFade) applyFade(screenFade(performance.now() - motionSince));
+    updateVisibility();
     if (changed && compiled && mode === 'field') buildField();
     if (changed && !keepOrbit) setView(activeView); else draw();
+    scheduleFade();
   }
   function updateVisibility() {
     const showTrajectories = mode === 'trajectories' || mode === 'fluorescence';
@@ -307,67 +325,160 @@ export function mountScene(container) {
     groups.field.visible = mode === 'field'; groups.force.visible = mode === 'force';
     groups.trails.visible = layers.trails && showTrajectories;
     groups.atoms.visible = showTrajectories; groups.density.visible = mode === 'density';
+    if (heldPoints) heldPoints.visible = mode === 'trajectories' && !layers.fluorescence;
     groups.fluorescence.visible = layers.fluorescence;
     groups.densityScale.visible = activeView === 'cloud';
     groups.source.visible = mode !== 'density';
   }
-  let points = null, densityPoints = null;
+  let points = null, heldPoints = null, densityPoints = null, freeDensity = null, trailLines = null;
+  function samplePoints(group, name, size, color, opacity) {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(3 * result.n), 3).setUsage(THREE.DynamicDrawUsage));
+    geometry.setDrawRange(0, 0);
+    const material = new THREE.PointsMaterial({ size, color, opacity, map: radialTexture, transparent: true,
+      depthWrite: false, blending: group === groups.density ? THREE.AdditiveBlending : THREE.NormalBlending });
+    const obj = new THREE.Points(geometry, material);
+    obj.name = name;
+    obj.frustumCulled = false;
+    group.add(obj);
+    return obj;
+  }
+  function makeTrailLines() {
+    const geometry = new THREE.BufferGeometry(), capacity = 2 * 8 * Math.min(18, result.n);
+    geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(3 * capacity), 3).setUsage(THREE.DynamicDrawUsage));
+    geometry.setAttribute('weight', new THREE.BufferAttribute(new Float32Array(capacity), 1).setUsage(THREE.DynamicDrawUsage));
+    geometry.setDrawRange(0, 0);
+    const material = new THREE.ShaderMaterial({
+      uniforms: { fade: { value: 0 } },
+      vertexShader: `attribute float weight; varying float strength;
+        void main() { strength = weight; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+      fragmentShader: `varying float strength; uniform float fade;
+        void main() { gl_FragColor = vec4(0.43, 0.68, 0.77, 0.65 * fade * strength); }`,
+      transparent: true, depthWrite: false,
+    });
+    const obj = new THREE.LineSegments(geometry, material);
+    obj.name = 'mot-recent-trails';
+    obj.frustumCulled = false;
+    groups.trails.add(obj);
+    return obj;
+  }
+  function updateTrails(frame) {
+    const { frames, n, frameAlive, frameCount } = result;
+    const { first, segments, step } = recentWindow(result, frame, 8);
+    const { position, weight } = trailLines.geometry.attributes;
+    let count = 0;
+    for (let s = 0; s < segments; s++) {
+      const start = first + s * step, end = s + 1 === segments ? frame : first + (s + 1) * step;
+      for (let i = 0; i < Math.min(n, 18); i++) {
+        if (start >= fluorescenceVolume.capturedFrom[i] || !frameAlive[Math.floor(start) * n + i]) continue;
+        const clippedEnd = Math.min(end, fluorescenceVolume.capturedFrom[i]);
+        for (let endpoint = 0; endpoint < 2; endpoint++) {
+          const t = endpoint === 0 ? start : clippedEnd;
+          const lo = Math.floor(t), a = lo * n + i, b = Math.min(lo + 1, frameCount - 1) * n + i;
+          for (let axis = 0; axis < 3; axis++)
+            position.array[count*3 + axis] = 1000 * (frames[a*3 + axis] + (t - lo) * (frames[b*3 + axis] - frames[a*3 + axis]));
+          weight.array[count++] = (t - first) / (frame - first);
+        }
+      }
+    }
+    trailLines.geometry.setDrawRange(0, count);
+    position.needsUpdate = weight.needsUpdate = true;
+  }
+  function updateAtoms(frame) {
+    const { n, frames, frameAlive } = result;
+    const free = points.geometry.attributes.position, held = heldPoints.geometry.attributes.position;
+    const density = densityPoints.geometry.attributes.position, flybyDensity = freeDensity.geometry.attributes.position;
+    let freeCount = 0, heldCount = 0;
+    for (let i = 0; i < n; i++) {
+      const k = frame * n + i;
+      if (!frameAlive[k]) continue;
+      const x = 1000 * frames[3*k], y = 1000 * frames[3*k + 1], z = 1000 * frames[3*k + 2];
+      if (fluorescenceVolume.capturedFrom[i] <= frame) {
+        held.setXYZ(heldCount, x, y, z); density.setXYZ(heldCount++, x, y, z);
+      } else if (motionFade > 0) {
+        free.setXYZ(freeCount, x, y, z); flybyDensity.setXYZ(freeCount++, x, y, z);
+      }
+    }
+    points.geometry.setDrawRange(0, freeCount);
+    heldPoints.geometry.setDrawRange(0, heldCount);
+    densityPoints.geometry.setDrawRange(0, heldCount);
+    freeDensity.geometry.setDrawRange(0, freeCount);
+    free.needsUpdate = held.needsUpdate = density.needsUpdate = flybyDensity.needsUpdate = true;
+  }
+  function applyFade(value) {
+    motionFade = value;
+    flybyLight.material.uniforms.fade.value = value;
+    if (trailLines) trailLines.material.uniforms.fade.value = value;
+    if (points) points.material.opacity = value;
+    if (freeDensity) freeDensity.material.opacity = .06 * value;
+    if (!value) {
+      flybyLight.geometry.setDrawRange(0, 0);
+      trailLines?.geometry.setDrawRange(0, 0);
+      points?.geometry.setDrawRange(0, 0);
+      freeDensity?.geometry.setDrawRange(0, 0);
+    }
+  }
+  function scheduleFade() {
+    clearTimeout(fadeTimer);
+    cancelAnimationFrame(fadeAnimation);
+    if (!motionFade || disposed) return;
+    const visible = (groups.fluorescence.visible && flybyLight.geometry.drawRange.count) ||
+      (groups.trails.visible && trailLines?.geometry.drawRange.count) || (groups.atoms.visible && points?.geometry.drawRange.count) ||
+      (groups.density.visible && freeDensity?.geometry.drawRange.count);
+    if (!visible) return;
+    // 连续播放本身会绘制画面。只有在时间轴停止更新之后才启动余迹动画。
+    fadeTimer = setTimeout(() => { fadeAnimation = requestAnimationFrame(fadeTick); }, 40);
+  }
+  function fadeTick(now) {
+    if (disposed) return;
+    applyFade(screenFade(now - motionSince));
+    draw();
+    if (motionFade > 0) fadeAnimation = requestAnimationFrame(fadeTick);
+  }
   function setResult(next) {
     if (result === next) return;
-    result = next; clear(groups.atoms); clear(groups.density); clear(groups.densityScale); clear(groups.trails); points = densityPoints = null;
-    fluorescenceVolume = null; fluorescenceFrame = -1;
-    emissionPoints.geometry.dispose();
-    emissionPoints.geometry = emptyFluorescenceGeometry();
+    result = next; clear(groups.atoms); clear(groups.density); clear(groups.densityScale); clear(groups.trails);
+    points = densityPoints = freeDensity = heldPoints = trailLines = null;
+    fluorescenceVolume = result ? createFluorescenceVolume(result) : null;
+    fluorescenceFrame = currentFrame = -1;
+    for (const obj of [cloudLight, flybyLight]) {
+      obj.geometry.dispose(); obj.geometry = new THREE.BufferGeometry(); obj.geometry.setDrawRange(0, 0);
+    }
     if (result) {
-      const g = new THREE.BufferGeometry();
-      g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(result.n * 3), 3));
-      g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(result.n * 3), 3));
-      points = new THREE.Points(g, new THREE.PointsMaterial({ size: .65, vertexColors: true, map: radialTexture, transparent: true, depthWrite: false, alphaTest: .05 }));
-      groups.atoms.add(points);
-      const dg = new THREE.BufferGeometry(); dg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(result.n * 3), 3));
-      densityPoints = new THREE.Points(dg, new THREE.PointsMaterial({ size: .6, color: C.cyan, map: radialTexture, transparent: true,
-        opacity: .06, depthWrite: false, blending: THREE.AdditiveBlending }));
-      groups.density.add(densityPoints);
+      if (activeView === 'cloud' && result.summary.centroidMM) {
+        const center = vector(result.summary.centroidMM), shift = center.clone().sub(cloudFocus);
+        camera.position.add(shift); controls.target.add(shift); cloudFocus.copy(center);
+        controls.update();
+      }
+      points = samplePoints(groups.atoms, 'mot-atoms-in-flight', .55, C.cyan, 1);
+      heldPoints = samplePoints(groups.atoms, 'mot-atoms-held', .45, C.lime, 1);
+      densityPoints = samplePoints(groups.density, 'mot-cloud-density', .6, C.cyan, .06);
+      freeDensity = samplePoints(groups.density, 'mot-in-flight-density', .6, C.cyan, .06);
+      trailLines = makeTrailLines();
       {
         const c = result.summary.centroidMM ?? [0, 0, 0], start = [c[0] - .5, c[1] - .8, c[2] - .8];
         line([start, [start[0] + 1, start[1], start[2]]], 0xc8d8e6, groups.densityScale);
         label('1 mm', [start[0] + .5, start[1], start[2] - .12], groups.densityScale);
       }
-      for (let i = 0; i < Math.min(18, result.n); i++) {
-        const ps = [];
-        for (let f = 0; f < result.frameCount; f++) {
-          const k = (f * result.n + i) * 3;
-          if ((!result.frameAlive || result.frameAlive[f * result.n + i]) && Number.isFinite(result.frames[k]))
-            ps.push(vector(Array.from(result.frames.slice(k, k + 3))).multiplyScalar(1000));
-        }
-        if (ps.length > 1) line(ps, result.retained[i] ? C.lime : 0x628da9, groups.trails, .4);
-      }
     }
-    setTime(fraction);
+    updateVisibility();
+    setTime(fraction, fraction === 1);
   }
-  function setTime(value) {
+  function setTime(value, settled = false) {
     fraction = Math.max(0, Math.min(1, value));
-    if (result && points) {
-      const f = Math.min(result.frameCount - 1, Math.round(fraction * (result.frameCount - 1)));
-      const p = points.geometry.attributes.position, color = points.geometry.attributes.color;
-      const dp = densityPoints.geometry.attributes.position;
-      const retainedColor = new THREE.Color(C.lime), otherColor = new THREE.Color(C.cyan);
-      for (let i = 0; i < result.n; i++) {
-        const k = (f * result.n + i) * 3;
-        const visible = !result.frameAlive || result.frameAlive[f * result.n + i];
-        const x = visible ? result.frames[k] * 1000 : 1e5;
-        const y = visible ? result.frames[k + 1] * 1000 : 1e5;
-        const z = visible ? result.frames[k + 2] * 1000 : 1e5;
-        p.setXYZ(i, x, y, z); dp.setXYZ(i, x, y, z);
-        const c = result.retained[i] && fraction > .99 ? retainedColor : otherColor;
-        color.setXYZ(i, c.r, c.g, c.b);
-      }
-      p.needsUpdate = dp.needsUpdate = color.needsUpdate = true;
-      points.geometry.computeBoundingSphere(); densityPoints.geometry.computeBoundingSphere();
-      // Replays only the already traversed part of each computed trajectory.
-      groups.trails.children.forEach(l => l.geometry.setDrawRange(0, Math.max(1, f + 1)));
+    if (result) {
+      const frame = Math.round(fraction * (result.frameCount - 1));
+      if (frame === currentFrame) return;
+      currentFrame = frame;
+      motionSince = performance.now();
+      applyFade(settled ? 0 : 1);
+      updateAtoms(frame);
+      if (motionFade > 0) updateTrails(frame);
+    } else {
+      applyFade(0);
     }
     updateFluorescence();
+    scheduleFade();
     draw();
   }
   function setParams(next, d, velocity = forceVelocity) {
@@ -392,13 +503,15 @@ export function mountScene(container) {
       const compactAxisLabel = width < 500 && l.group === groups.fixed && l.el.textContent.includes('·');
       const shown = l.group.visible && !compactAxisLabel && p.z > -1 && p.z < 1;
       l.el.style.display = shown ? '' : 'none';
-      l.el.style.transform = `translate(${(p.x + 1) * width / 2}px,${(1 - p.y) * height / 2}px) translate(-50%,-50%)`;
+      const offset = l.group === groups.zero ? 'translate(12px,calc(-100% - 8px))' : 'translate(-50%,-50%)';
+      l.el.style.transform = `translate(${(p.x + 1) * width / 2}px,${(1 - p.y) * height / 2}px) ${offset}`;
     }
     renderer.render(scene, camera);
   }
   function setView(view) {
     activeView = view;
     const center = view === 'cloud' ? vector(result?.summary.centroidMM ?? [0, 0, 0]) : new THREE.Vector3(-4, 0, 0);
+    if (view === 'cloud') cloudFocus.copy(center);
     const offsets = { iso: [61, -79, 55], xy: [0, 0, 110], xz: [0, -110, 0], yz: [110, 0, 0], cloud: [3, -4.3, 3] };
     camera.up.set(0, 0, 1); if (view === 'xy') camera.up.set(0, 1, 0);
     if (mode === 'force') center.set(0, 0, 0);
@@ -413,14 +526,19 @@ export function mountScene(container) {
   function resize() {
     const w = Math.max(1, container.clientWidth), h = Math.max(1, container.clientHeight);
     renderer.setSize(w, h, false); camera.aspect = w / h;
-    fluorescenceMaterial.uniforms.viewportHeight.value = h * renderer.getPixelRatio();
+    for (const obj of [cloudLight, flybyLight]) obj.material.uniforms.viewportHeight.value = h * renderer.getPixelRatio();
     camera.fov = 2 * Math.atan(Math.tan(18 * Math.PI / 180) * Math.max(1, 1.45 / camera.aspect)) * 180 / Math.PI;
     camera.updateProjectionMatrix(); draw();
   }
   const observer = new ResizeObserver(resize); observer.observe(container);
   controls.addEventListener('change', draw); setView('iso'); resize();
   return { setParams, setResult, setTime, setView, setMode, setForceVelocity, setFluorescenceFlux,
-    setLayers(v) { layers = { ...layers, ...v }; updateVisibility(); updateFluorescence(); draw(); }, resize,
-    destroy() { disposed = true; observer.disconnect(); controls.dispose(); Object.values(groups).forEach(clear);
+    setLayers(v) {
+      layers = { ...layers, ...v };
+      if (motionFade) applyFade(screenFade(performance.now() - motionSince));
+      updateVisibility(); updateFluorescence(); scheduleFade(); draw();
+    }, resize,
+    destroy() { disposed = true; clearTimeout(fadeTimer); cancelAnimationFrame(fadeAnimation);
+      observer.disconnect(); controls.dispose(); Object.values(groups).forEach(clear);
       disposables.forEach(o => o.dispose()); renderer.dispose(); renderer.domElement.remove(); overlay.remove(); } };
 }
