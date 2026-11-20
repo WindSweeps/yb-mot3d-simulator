@@ -432,6 +432,11 @@ function startPendingDemo() {
 }
 
 function openSceneLink() {
+  if (location.hash === "#sequence") {
+    rememberSequenceInputs();
+    location.replace("./sequence.html");
+    return;
+  }
   const demo = location.hash === "#demo";
   autoDemoPending = demo && !demoVisited && !reducedMotion.matches;
   if (demo) demoVisited = true;
@@ -514,6 +519,11 @@ function selectedLayers() {
   return { beams: $("#layer-beams").checked, coils: $("#layer-coils").checked, trails: $("#layer-trails").checked, fluorescence: fluorescenceLayer.checked };
 }
 
+function rememberSequenceInputs() {
+  try { sessionStorage.setItem("yb-mot3d-sequence-inputs", JSON.stringify({ ...params, incidentFlux: fluorescence.getFlux() })); }
+  catch { /* 浏览器禁用会话存储时，时序页仍可使用独立输入。 */ }
+}
+
 function updateFluorescencePanel() {
   const checked = fluorescenceLayer.checked;
   fluorescencePanel.hidden = mode !== "fluorescence" && !checked;
@@ -561,6 +571,7 @@ function storageAvailable() {
 }
 
 function wireActions() {
+  $("#open-sequence").addEventListener("click", rememberSequenceInputs);
   $("#gravity-toggle").addEventListener("change", (event) => { params.gravity = event.target.checked; parametersChanged(); });
   $("#recoil-toggle").addEventListener("change", (event) => { params.recoil = event.target.checked; parametersChanged(); });
   $("#main-axis").addEventListener("change", (event) => { params.mainAxis = event.target.value; syncControls(); parametersChanged(); });

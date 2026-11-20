@@ -1,0 +1,52 @@
+.sequence-page .header-actions a { text-decoration:none; }
+.sequence-workspace { display:grid; grid-template-columns:minmax(0,1.12fr) minmax(0,1fr); gap:18px 24px; align-items:start; }
+.sequence-workspace > * { min-width:0; }
+.sequence-outputs { min-width:0; display:grid; grid-template-columns:minmax(0,1fr); gap:16px; }
+.sequence-outputs > * { min-width:0; }
+.sequence-scene-head,.sequence-scene-status,.sequence-total { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+.sequence-scene-head { padding:16px 18px 10px; }
+.sequence-scene-head h2,.sequence-readings h2 { font-size:var(--body); margin:0; }
+.sequence-scene-head p { color:var(--muted); font-size:var(--meta); margin:2px 0 0; }
+.sequence-views { display:flex; flex-wrap:wrap; gap:4px; }
+.sequence-views [aria-pressed=true] { color:var(--cyan); border-color:var(--cyan); }
+.sequence-page .scene-viewport { position:relative; height:360px; min-height:0; }
+.sequence-layers { display:flex; flex-wrap:wrap; align-items:center; gap:6px 16px; margin:0; border:0; padding:8px 18px; font-size:var(--meta); }
+.sequence-layers label { display:inline-flex; align-items:center; gap:4px; min-height:30px; }
+.sequence-layers input { accent-color:var(--cyan); }
+.sequence-scene-status { padding:6px 18px 12px; font-size:var(--meta); color:var(--muted); min-height:34px; }
+.sequence-readings,.sequence-apparatus,.sequence-method { border:1px solid var(--line); border-radius:8px; background:var(--panel); padding:16px 18px; }
+.sequence-stat-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); margin:12px 0; gap:8px; }
+.sequence-stat-grid span,.sequence-stat-grid output { display:block; }
+.sequence-stat-grid span,.sequence-note,.sequence-method p,.sequence-apparatus p { color:var(--muted); font-size:var(--meta); }
+.sequence-stat-grid output { color:var(--text); font:var(--meta)/1.65 var(--mono); overflow-wrap:anywhere; }
+.sequence-stat-grid b,#seq-count { font:600 var(--body)/1.65 var(--mono); }
+.sequence-transfer { width:100%; border-collapse:collapse; font-size:var(--meta); }
+.sequence-transfer th,.sequence-transfer td { white-space:nowrap; text-align:right; font-weight:400; padding:5px 0; border-top:1px solid var(--line-soft); }
+.sequence-transfer th:first-child { text-align:left; }
+.sequence-transfer thead { color:var(--muted); }
+.sequence-transfer td,.sequence-total output { font-family:var(--mono); }
+.sequence-total { font-size:var(--meta); margin:7px 0; color:var(--lime); }
+.sequence-note { margin:8px 0 0; }
+.sequence-loading { margin:12px 0 0; padding-top:10px; border-top:1px solid var(--line-soft); }
+.sequence-loading output { font-family:var(--mono); color:var(--text); }
+.sequence-loading-controls { margin-top:8px; font-size:var(--meta); }
+.sequence-loading-controls form { display:grid; gap:8px; margin:8px 0; }
+.sequence-loading-controls label { display:grid; grid-template-columns:minmax(0,1fr) minmax(72px,38%); gap:8px; align-items:center; }
+.sequence-loading-controls input { width:100%; min-width:0; }
+.sequence-apparatus summary,.sequence-method summary { font-size:var(--body); cursor:pointer; }
+.sequence-apparatus form { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin:14px 0; }
+.sequence-apparatus label { display:flex; flex-direction:column; gap:5px; font-size:var(--meta); color:var(--muted); }
+.sequence-method p { margin:10px 0 0; }
+#sequence-scene-error,#sequence-file-status { font-size:var(--meta); color:var(--amber); margin:0; }
+#sequence-scene-error { padding:6px 18px; }
+#sequence-file-status:empty { display:none; }
+@media(max-width:960px) {
+  .sequence-workspace { grid-template-columns:minmax(0,1fr); }
+  .sequence-page main { padding:18px 14px; }
+}
+@media(max-width:550px) {
+  .sequence-transfer th,.sequence-transfer td { white-space:normal; overflow-wrap:anywhere; }
+  .sequence-page .scene-viewport { height:300px; }
+  .sequence-scene-head,.sequence-readings,.sequence-apparatus,.sequence-method { padding:12px; }
+  .sequence-apparatus form { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}

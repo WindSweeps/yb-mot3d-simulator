@@ -7,6 +7,7 @@ export const CONSTANTS = Object.freeze({
 });
 const C = CONSTANTS, K = 2 * Math.PI / C.wavelength;
 const RECOIL = C.hbar * K / C.mass;
+export const BLUE_TRANSITION = Object.freeze({ k: K, gamma: C.gamma, lande: 1, recoil: RECOIL });
 const ISAT = Math.PI * C.h * C.c * C.gamma / (3 * C.wavelength ** 3);
 const SQ3 = Math.sqrt(3) / 2;
 export const BEAM_DIRECTIONS = Object.freeze([
@@ -80,7 +81,8 @@ export function fieldAt(pos, paramsOrCompiled = {}) {
 }
 
 // Internal scratch: [ax,ay,az,R(+V1),R(-V1),R(+V2),R(-V2),R(+H),R(-H)].
-function evaluate(x, y, z, vx, vy, vz, c, out, s) {
+export function evaluate(x, y, z, vx, vy, vz, c, out, s, transition = BLUE_TRANSITION) {
+  const { k, gamma, lande, recoil } = transition;
   const r2 = x*x + y*y + z*z;
   let saturation = 1;
   for (let j = 0; j < 6; j++) {
@@ -89,19 +91,19 @@ function evaluate(x, y, z, vx, vy, vz, c, out, s) {
     saturation += s[j];
   }
   const bx = c.fieldSlope[0]*x + c.bias[0], by = c.fieldSlope[1]*y + c.bias[1], bz = c.fieldSlope[2]*z + c.bias[2];
-  const b = Math.hypot(bx, by, bz), zeeman = C.muB * b / C.hbar;
+  const b = Math.hypot(bx, by, bz), zeeman = lande * C.muB * b / C.hbar;
   let ax = 0, ay = 0, az = 0;
   for (let j = 0; j < 6; j++) {
     const d = BEAM_DIRECTIONS[j];
     const cosine = b > 0 ? Math.max(-1, Math.min(1, (d[0]*bx+d[1]*by+d[2]*bz) / b)) : 0;
     const hc = HELICITIES[j] * cosine;
-    const dp = 2 * (c.detuning - K*(d[0]*vx+d[1]*vy+d[2]*vz) - zeeman) / C.gamma;
-    const dz = dp + 2 * zeeman / C.gamma, dm = dz + 2 * zeeman / C.gamma;
-    const rate = .5 * C.gamma * s[j] * (
+    const dp = 2 * (c.detuning - k*(d[0]*vx+d[1]*vy+d[2]*vz) - zeeman) / gamma;
+    const dz = dp + 2 * zeeman / gamma, dm = dz + 2 * zeeman / gamma;
+    const rate = .5 * gamma * s[j] * (
       .25*(1+hc)**2 / (saturation+dp*dp) + .5*(1-cosine*cosine) / (saturation+dz*dz)
       + .25*(1-hc)**2 / (saturation+dm*dm));
     out[3+j] = rate;
-    ax += RECOIL * rate * d[0]; ay += RECOIL * rate * d[1]; az += RECOIL * rate * d[2];
+    ax += recoil * rate * d[0]; ay += recoil * rate * d[1]; az += recoil * rate * d[2];
   }
   out[0] = ax; out[1] = ay; out[2] = az;
   return out;
@@ -122,7 +124,7 @@ export function acceleration(pos, vel, paramsOrCompiled = {}) {
   return a;
 }
 
-function random(seed) {
+export function random(seed) {
   let state = seed >>> 0, spare = null;
   const uniform = () => {
     state = (state + 0x6D2B79F5) >>> 0;
@@ -130,7 +132,7 @@ function random(seed) {
     t ^= t + Math.imul(t ^ t >>> 7, 61 | t);
     return ((t ^ t >>> 14) >>> 0) / 4294967296;
   };
-  return { normal() {
+  return { uniform, normal() {
     if (spare !== null) { const s = spare; spare = null; return s; }
     const r = Math.sqrt(-2 * Math.log(Math.max(uniform(), 1e-15))), a = 2*Math.PI*uniform();
     spare = r*Math.sin(a); return r*Math.cos(a);

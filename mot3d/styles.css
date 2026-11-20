@@ -28,6 +28,8 @@ svg { display:block; }
 .text-button:hover { color:var(--text); }
 main { max-width:1584px; padding:24px; margin:auto; }
 .workspace-grid { display:grid; grid-template-columns:324px minmax(0,1fr); gap:24px; align-items:start; }
+.sequence-entry { display:flex; justify-content:flex-end; margin:0 0 12px; }
+.sequence-entry a { color:var(--cyan); text-decoration:none; }
 .controls { min-width:0; border:1px solid var(--line); border-radius:10px; background:var(--panel); overflow:hidden; }
 .control-section { padding:22px; border-bottom:1px solid var(--line-soft); }
 .section-heading { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:20px; }

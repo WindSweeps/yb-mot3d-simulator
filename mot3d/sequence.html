@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0b1725">
+  <title>Yb · 双色 MOT 实验时序</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='15' fill='%23090c12'/%3E%3Ctext x='8' y='43' font-size='35' fill='%235ce1e6'%3EYb%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./sequence.css">
+  <link rel="stylesheet" href="./sequence-workspace.css">
+</head>
+<body class="sequence-page">
+  <a class="skip-link" href="#sequence-editor">跳到通道时序</a>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark" aria-hidden="true">Yb</span><div><h1>双色 MOT 实验时序</h1><p>¹⁷⁴Yb · 399 nm / 556 nm</p></div></div>
+    <nav class="header-actions" aria-label="工作台"><a class="button quiet" href="./#demo">蓝 MOT 工作台</a><button class="button" id="sequence-import">导入时序</button><button class="button" id="sequence-export">导出时序</button><input type="file" id="sequence-file" accept=".json,application/json" hidden></nav>
+  </header>
+  <main class="sequence-workspace">
+    <section id="sequence-editor" aria-label="通道时序"></section>
+    <section class="sequence-outputs" aria-label="时序模拟结果">
+      <div class="scene-card">
+        <div class="sequence-scene-head"><div><h2>三维 MOT</h2><p id="sequence-stage-text">双色装载</p></div>
+          <div class="sequence-views" aria-label="三维视角"><button type="button" class="small-button" data-seq-view="iso" aria-pressed="true">全景</button><button type="button" class="small-button" data-seq-view="xz" aria-pressed="false">XZ</button><button type="button" class="small-button" data-seq-view="cloud" aria-pressed="false">云团放大</button></div></div>
+        <div id="sequence-viewport" class="scene-viewport" aria-label="双色 MOT 的六束光、线圈和原子"></div>
+        <fieldset class="sequence-layers"><legend class="sr-only">三维图层</legend>
+          <label><input type="checkbox" data-seq-layer="beams" checked> 光束</label><label><input type="checkbox" data-seq-layer="coils" checked> 线圈</label><label><input type="checkbox" data-seq-layer="trails" checked> 轨迹</label><label><input type="checkbox" data-seq-layer="fluorescence" checked> 荧光</label>
+        </fieldset>
+        <div class="sequence-scene-status"><span id="sequence-compute-status" role="status">正在准备求解器</span><button type="button" class="text-button" id="sequence-retry" hidden>重新计算</button></div>
+        <p id="sequence-scene-error" role="alert" hidden></p>
+      </div>
+      <section class="sequence-readings" aria-label="样本与转移效率">
+        <h2>原子样本</h2>
+        <div class="sequence-stat-grid">
+          <div><span>当前阱内样本</span><output id="seq-count">—</output></div>
+          <div><span>动能温度</span><output><b id="seq-temperature">—</b> µK</output></div>
+          <div><span>云团 RMS 半径</span><output><b id="seq-radius">—</b> mm</output></div>
+        </div>
+        <table class="sequence-transfer"><thead><tr><th scope="col">观察时刻</th><th scope="col">留存样本</th><th scope="col">相对上一步</th></tr></thead><tbody>
+          <tr><th scope="row">关蓝前 N₀</th><td id="seq-n0">—</td><td>基准</td></tr>
+          <tr><th scope="row">纯绿接收后 N₁</th><td id="seq-n1">—</td><td id="seq-e1">—</td></tr>
+          <tr><th scope="row">压缩结束 N₂</th><td id="seq-n2">—</td><td id="seq-e2">—</td></tr>
+        </tbody></table>
+        <p class="sequence-total">转移和压缩合计 N₂ / N₀ <output id="seq-transfer">—</output></p>
+        <p id="seq-window-note" class="sequence-note"></p>
+        <p class="sequence-loading"><span id="seq-loading-label">装载原子数估计</span> <output id="seq-population">—</output></p>
+        <details class="sequence-loading-controls"><summary>入射通量与装载损失</summary>
+          <form id="seq-loading-inputs">
+            <label>入射通量 Φ / (原子/s)<input name="flux" type="number" min="0" max="1e15" step="any" value="1e9" required></label>
+            <label>单体损失 α / s⁻¹<input name="alpha" type="number" min="0" max="1e4" step="any" value="0.53" required></label>
+            <label>双体损失 β / (原子·s)⁻¹<input name="beta" type="number" min="0" max="1" step="any" value="1.7e-9" required></label>
+          </form>
+          <p class="sequence-note">从空阱出发按 dN/dt = Φp − αN − βN² 计算，p 取装载样本留存比例。默认 α、β 来自宋博组双色 MOT 装载拟合，改变光场后可填入对应实测值。<a href="https://arxiv.org/html/2503.24383v2#S5" target="_blank" rel="noopener">论文表 II ↗</a></p>
+        </details>
+      </section>
+    </section>
+    <details class="sequence-apparatus" id="sequence-apparatus"><summary>冷束、几何与抽样参数</summary>
+      <form id="sequence-inputs">
+        <label>蓝光束腰 / mm<input name="waistMM" type="number" min="1" max="15" step="any" required></label>
+        <label>绿光束腰 / mm<input name="greenWaistMM" type="number" min="1" max="15" step="any" required></label>
+        <label>冷束纵速均值 / (m/s)<input name="sourceSpeed" type="number" min="0" max="100" step="any" required></label>
+        <label>冷束纵速标准差 / (m/s)<input name="sourceSpread" type="number" min="0" max="30" step="any" required></label>
+        <label>样本数<select name="n"><option>96</option><option selected>192</option><option>384</option><option>768</option></select></label>
+        <label>随机种子<input name="seed" type="number" min="1" max="2147483647" step="1" required></label>
+      </form>
+      <p class="sequence-note" id="sequence-geometry"></p>
+    </details>
+    <details class="sequence-method"><summary>论文参数、时序假设与模型</summary>
+      <p>各通道共享一条以毫秒计的时间轴。同一时间戳上的光强、频率和梯度同时生效。浏览器只在本机模拟这组事件。<a href="https://m-labs.hk/artiq/manual/rtio.html#timeline-and-output-events" target="_blank" rel="noopener">ARTIQ 时间轴与输出事件 ↗</a></p>
+      <p>宋博组在双色装载时将 556 nm 设为蓝失谐。交接开始时，绿光跳至红失谐，399 nm 在 1 ms 内关闭。压缩时改变绿光失谐、降低功率并提高梯度。网页把论文的两对强光分配给 V1、V2，一对弱光分配给沿 Y 轴的 H。<a href="https://arxiv.org/pdf/2503.24383v2#page=3" target="_blank" rel="noopener">Li 等，第 V 节 ↗</a></p>
+      <p>默认纯绿接收驻留 10 ms，弱光每束按强弱功率比例降至 14.9 µW。接收时长、磁场的线性响应和功率曲线都属于模型设定。两色共用基态，光力随各束高斯光强、多普勒频移、Zeeman 频移与偏振变化。积分包括重力与可选的随机光子反冲。</p>
+      <p>装载阶段用最初 20 ms 的轨迹估计捕获概率，并用速率方程计算整个装载时段的原子数。交接和压缩逐步积分同一批留存原子。温度由扣除云团平均速度后的三维速度方差计算，RMS 半径由相对云心的三维位移计算。</p>
+    </details>
+    <p id="sequence-file-status" role="status"></p>
+  </main>
+  <script type="module" src="./sequence-app.js"></script>
+</body>
+</html>

@@ -5,6 +5,7 @@ import { OrbitControls } from '../anatomy-demo/vendor/OrbitControls-r160.js';
 import { compile, fieldAt, opticalAcceleration, BEAM_DIRECTIONS } from './physics.js';
 import { DEFAULT_FLUX } from './fluorescence.js';
 import { createFluorescenceVolume, recentWindow, screenFade } from './fluorescence-volume.js';
+import { createSequenceRender } from './sequence-render.js';
 
 const C = { cyan: 0x58d5eb, lime: 0xc1ed79, amber: 0xf4bb69, copper: 0xc68a58, text: '#c8d8e6' };
 const vector = a => new THREE.Vector3(...a);
@@ -30,13 +31,15 @@ export function mountScene(container) {
   controls.maxDistance = 220;
 
   const groups = {};
-  for (const name of ['fixed', 'beams', 'coils', 'source', 'field', 'force', 'trails', 'atoms', 'density', 'densityScale', 'zero', 'fluorescence']) {
+  for (const name of ['fixed', 'beams', 'coils', 'source', 'field', 'force', 'trails', 'atoms', 'density', 'densityScale', 'zero', 'fluorescence', 'sequenceBeams', 'sequenceAtoms', 'sequenceTrails', 'sequenceScale']) {
     groups[name] = new THREE.Group();
     groups[name].name = `mot-${name}`;
     scene.add(groups[name]);
   }
   const labels = [];
   let params, derived, compiled, result = null, mode = 'trajectories', fraction = 1, activeView = 'iso';
+  let sequenceFrame = null, sequenceRender = null, mainCoilLabel = null;
+  let sequenceGeometryChanged = true;
   let forceVelocity = [0, 0, 0], layers = { beams: true, coils: true, trails: true, fluorescence: false };
   let disposed = false;
   const disposables = new Set();
@@ -60,7 +63,10 @@ export function mountScene(container) {
     const el = document.createElement('span'); el.textContent = text;
     Object.assign(el.style, { position: 'absolute', fontSize: '12px', lineHeight: '18px', color,
       padding: '1px 4px', background: 'rgba(11,23,37,.75)', borderRadius: '3px', whiteSpace: 'nowrap' });
-    overlay.append(el); labels.push({ el, p: vector(p), group });
+    overlay.append(el);
+    const entry = { el, p: vector(p), group };
+    labels.push(entry);
+    return entry;
   }
   function arrow(start, dir, length, color, group, head = 1.5, opacity = 1) {
     if (length < .01) return;
@@ -208,13 +214,14 @@ export function mountScene(container) {
   function buildCoils() {
     clear(groups.coils);
     const main = params.mainAxis === 'z' ? [0, 0, 1] : [0, 1, 0];
+    const winding = Math.sign(sequenceFrame ? sequenceFrame.gradientGCM : params.mainCurrentA);
     for (const sign of [-1, 1]) {
       for (let t = 0; t < 3; t++) ring(main.map(v => v * (12 + t * .55) * sign), main, 20 + t * .4,
-        C.copper, groups.coils, params.mainCurrentA === 0 ? .2 : .65);
+        C.copper, groups.coils, winding === 0 ? .2 : .65);
       currentArrows(main.map(v => v * 12.55 * sign), main, 20.4,
-        sign * Math.sign(params.mainCurrentA), C.amber, groups.coils);
+        sign * winding, C.amber, groups.coils);
     }
-    label(`主线圈 · ${params.mainAxis?.toUpperCase() || 'Y'} 轴`, main.map(v => v * 15).map((v, i) => v + (i === 0 ? 22 : 0)), groups.coils, '#e9b58b');
+    mainCoilLabel = label(`主线圈 · ${params.mainAxis?.toUpperCase() || 'Y'} 轴`, main.map(v => v * 15).map((v, i) => v + (i === 0 ? 22 : 0)), groups.coils, '#e9b58b');
     [[1, 0, 0], [0, 1, 0], [0, 0, 1]].forEach((axis, i) => {
       for (const sign of [-1, 1]) {
         const center = axis.map(v => v * (21 + i) * sign), color = [C.cyan, C.lime, C.amber][i];
@@ -254,11 +261,28 @@ export function mountScene(container) {
   }
   function buildZero() {
     clear(groups.zero);
+    groups.zero.position.set(0, 0, 0);
+    if (sequenceFrame) {
+      const size = activeView === 'cloud' ? .16 : 1.5;
+      for (let axis = 0; axis < 3; axis++) {
+        const end = [0, 0, 0]; end[axis] = size;
+        line([end.map(v => -v), end], 0xffffff, groups.zero, .7);
+      }
+      label('B = 0', [0, 0, 0], groups.zero, '#ffffff');
+      moveSequenceZero();
+      return;
+    }
     if (!derived.zeroUnique || !derived.zeroMM || Math.max(...derived.zeroMM.map(Math.abs)) > 48) return;
     const p = derived.zeroMM;
     const small = activeView === 'cloud', half = small ? .16 : 1.5;
     for (let j = 0; j < 3; j++) line([p.map((v, i) => v - (i === j ? half : 0)), p.map((v, i) => v + (i === j ? half : 0))], 0xffffff, groups.zero, .7);
     label('B = 0', p, groups.zero, '#ffffff');
+  }
+  function moveSequenceZero() {
+    const gradient = sequenceFrame.gradientGCM;
+    const zero = gradient && derived.biasG.map((b, i) => -10*b / (gradient * derived.mainTensor[i]));
+    groups.zero.visible = Boolean(zero && zero.every(v => Math.abs(v) <= 48));
+    if (groups.zero.visible) groups.zero.position.set(...zero);
   }
   function buildField() {
     clear(groups.field);
@@ -319,16 +343,22 @@ export function mountScene(container) {
     scheduleFade();
   }
   function updateVisibility() {
-    const showTrajectories = mode === 'trajectories' || mode === 'fluorescence';
-    groups.beams.visible = layers.beams && mode !== 'density';
-    groups.coils.visible = layers.coils && mode !== 'density';
-    groups.field.visible = mode === 'field'; groups.force.visible = mode === 'force';
+    const sequence = Boolean(sequenceFrame);
+    const showTrajectories = !sequence && (mode === 'trajectories' || mode === 'fluorescence');
+    groups.beams.visible = !sequence && layers.beams && mode !== 'density';
+    groups.coils.visible = layers.coils && (sequence || mode !== 'density');
+    groups.field.visible = !sequence && mode === 'field'; groups.force.visible = !sequence && mode === 'force';
     groups.trails.visible = layers.trails && showTrajectories;
-    groups.atoms.visible = showTrajectories; groups.density.visible = mode === 'density';
+    groups.atoms.visible = showTrajectories; groups.density.visible = !sequence && mode === 'density';
     if (heldPoints) heldPoints.visible = mode === 'trajectories' && !layers.fluorescence;
-    groups.fluorescence.visible = layers.fluorescence;
-    groups.densityScale.visible = activeView === 'cloud';
-    groups.source.visible = mode !== 'density';
+    groups.fluorescence.visible = !sequence && layers.fluorescence;
+    groups.sequenceBeams.visible = sequence && layers.beams;
+    groups.sequenceAtoms.visible = sequence;
+    groups.sequenceTrails.visible = sequence && layers.trails;
+    if (sequenceRender) sequenceRender.cloud.material.uniforms.fluorescence.value = layers.fluorescence;
+    groups.densityScale.visible = !sequence && activeView === 'cloud';
+    groups.sequenceScale.visible = sequence && activeView === 'cloud' && Boolean(sequenceFrame.centroidMM);
+    groups.source.visible = sequence || mode !== 'density';
   }
   let points = null, heldPoints = null, densityPoints = null, freeDensity = null, trailLines = null;
   function samplePoints(group, name, size, color, opacity) {
@@ -407,6 +437,10 @@ export function mountScene(container) {
   }
   function applyFade(value) {
     motionFade = value;
+    if (sequenceFrame && sequenceRender) {
+      sequenceRender.tails.material.opacity = .48 * value;
+      if (!value) sequenceRender.tails.geometry.setDrawRange(0, 0);
+    }
     flybyLight.material.uniforms.fade.value = value;
     if (trailLines) trailLines.material.uniforms.fade.value = value;
     if (points) points.material.opacity = value;
@@ -424,7 +458,8 @@ export function mountScene(container) {
     if (!motionFade || disposed) return;
     const visible = (groups.fluorescence.visible && flybyLight.geometry.drawRange.count) ||
       (groups.trails.visible && trailLines?.geometry.drawRange.count) || (groups.atoms.visible && points?.geometry.drawRange.count) ||
-      (groups.density.visible && freeDensity?.geometry.drawRange.count);
+      (groups.density.visible && freeDensity?.geometry.drawRange.count) ||
+      (groups.sequenceTrails.visible && sequenceRender?.tails.geometry.drawRange.count);
     if (!visible) return;
     // 连续播放本身会绘制画面。只有在时间轴停止更新之后才启动余迹动画。
     fadeTimer = setTimeout(() => { fadeAnimation = requestAnimationFrame(fadeTick); }, 40);
@@ -483,6 +518,7 @@ export function mountScene(container) {
   }
   function setParams(next, d, velocity = forceVelocity) {
     params = next; derived = d; compiled = compile(params);
+    sequenceGeometryChanged = true;
     forceVelocity = [...velocity];
     buildCoils(); buildBeams(); buildSource(); buildZero();
     if (mode === 'field') buildField();
@@ -494,12 +530,62 @@ export function mountScene(container) {
     forceVelocity = [...v];
     if (compiled && mode === 'force') { buildForce(); draw(); }
   }
+  function setSequenceFrame(next) {
+    if (!params) throw new Error('三维时序需要先设置光束几何。');
+    const previous = sequenceFrame;
+    sequenceFrame = next;
+    if (!next) {
+      if (!previous) return;
+      groups.zero.visible = true;
+      buildZero(); buildCoils(); updateVisibility();
+      applyFade(0); scheduleFade(); updateFluorescence(); draw();
+      return;
+    }
+    // 游标经过装载等待段时，每个通道及原子云都保持静止，保留上次绘图。
+    if (previous && !sequenceGeometryChanged && previous.gradientGCM === next.gradientGCM &&
+      previous.greenWaistMM === next.greenWaistMM && previous.positionsM?.buffer === next.positionsM?.buffer &&
+      previous.positionsM?.byteOffset === next.positionsM?.byteOffset &&
+      Boolean(previous.previousPositionsM) === Boolean(next.previousPositionsM) &&
+      next.bluePowersMW.every((p, i) => p === previous.bluePowersMW[i]) &&
+      next.greenPowersMW.every((p, i) => p === previous.greenPowersMW[i])) return;
+    sequenceGeometryChanged = false;
+    if (!sequenceRender) {
+      sequenceRender = createSequenceRender(groups.sequenceBeams, groups.sequenceAtoms, groups.sequenceTrails, label);
+      line([[-.5, -.8, -.8], [.5, -.8, -.8]], 0xc8d8e6, groups.sequenceScale);
+      label('1 mm', [0, -.8, -.92], groups.sequenceScale);
+      updateSequenceViewport();
+    }
+    if (!previous) buildZero();
+    if (!previous || Math.sign(previous.gradientGCM) !== Math.sign(next.gradientGCM)) buildCoils();
+    mainCoilLabel.el.textContent = `主线圈 · ${params.mainAxis.toUpperCase()} · ${Number(next.gradientGCM.toFixed(2))} G/cm`;
+    moveSequenceZero();
+    if (next.centroidMM) groups.sequenceScale.position.set(...next.centroidMM);
+    if (sequenceRender.setFrame(next, params.waistMM)) {
+      motionSince = performance.now();
+      applyFade(1);
+    }
+    updateVisibility();
+    if (activeView === 'cloud' && next.centroidMM) {
+      const center = vector(next.centroidMM), shift = center.clone().sub(cloudFocus);
+      if (shift.lengthSq() > 1e-12) {
+        controls.target.add(shift); camera.position.add(shift); cloudFocus.copy(center);
+        controls.update();
+      }
+    }
+    scheduleFade(); draw();
+  }
+  function updateSequenceViewport() {
+    if (!sequenceRender) return;
+    const u = sequenceRender.cloud.material.uniforms;
+    u.pixelRatio.value = renderer.getPixelRatio();
+    u.viewportHeight.value = Math.max(1, container.clientHeight) * renderer.getPixelRatio();
+  }
   function draw() {
     if (disposed) return;
     camera.updateMatrixWorld();
     const width = container.clientWidth, height = container.clientHeight;
     for (const l of labels) {
-      const p = l.p.clone().project(camera);
+      const p = l.p.clone().add(l.group.position).project(camera);
       const compactAxisLabel = width < 500 && l.group === groups.fixed && l.el.textContent.includes('·');
       const shown = l.group.visible && !compactAxisLabel && p.z > -1 && p.z < 1;
       l.el.style.display = shown ? '' : 'none';
@@ -510,7 +596,7 @@ export function mountScene(container) {
   }
   function setView(view) {
     activeView = view;
-    const center = view === 'cloud' ? vector(result?.summary.centroidMM ?? [0, 0, 0]) : new THREE.Vector3(-4, 0, 0);
+    const center = view === 'cloud' ? vector(sequenceFrame?.centroidMM ?? result?.summary.centroidMM ?? [0, 0, 0]) : new THREE.Vector3(-4, 0, 0);
     if (view === 'cloud') cloudFocus.copy(center);
     const offsets = { iso: [61, -79, 55], xy: [0, 0, 110], xz: [0, -110, 0], yz: [110, 0, 0], cloud: [3, -4.3, 3] };
     camera.up.set(0, 0, 1); if (view === 'xy') camera.up.set(0, 1, 0);
@@ -527,12 +613,13 @@ export function mountScene(container) {
     const w = Math.max(1, container.clientWidth), h = Math.max(1, container.clientHeight);
     renderer.setSize(w, h, false); camera.aspect = w / h;
     for (const obj of [cloudLight, flybyLight]) obj.material.uniforms.viewportHeight.value = h * renderer.getPixelRatio();
+    updateSequenceViewport();
     camera.fov = 2 * Math.atan(Math.tan(18 * Math.PI / 180) * Math.max(1, 1.45 / camera.aspect)) * 180 / Math.PI;
     camera.updateProjectionMatrix(); draw();
   }
   const observer = new ResizeObserver(resize); observer.observe(container);
   controls.addEventListener('change', draw); setView('iso'); resize();
-  return { setParams, setResult, setTime, setView, setMode, setForceVelocity, setFluorescenceFlux,
+  return { setParams, setResult, setTime, setView, setMode, setForceVelocity, setFluorescenceFlux, setSequenceFrame,
     setLayers(v) {
       layers = { ...layers, ...v };
       if (motionFade) applyFade(screenFade(performance.now() - motionSince));
