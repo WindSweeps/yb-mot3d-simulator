@@ -44,7 +44,7 @@
     <div id="sequence-panel-source" hidden>
     <section id="sequence-editor" aria-label="通道时序"></section>
       <div class="scene-card" id="sequence-scene">
-        <div class="sequence-scene-head"><div><h2>三维 MOT</h2><p id="sequence-stage-text">双色装载</p></div>
+        <div class="sequence-scene-head"><div><h2>三维 MOT</h2><p id="sequence-stage-text">双色装载</p><p id="seq-scene-population"></p></div>
           <div class="sequence-views" aria-label="三维视角"><button type="button" class="small-button" data-seq-view="iso" aria-pressed="true">全景</button><button type="button" class="small-button" data-seq-view="xz" aria-pressed="false">XZ</button><button type="button" class="small-button" data-seq-view="cloud" aria-pressed="false" title="围绕磁场零点旋转和缩放。梯度为零时使用线圈几何中心。">云团放大</button></div></div>
         <div id="sequence-viewport" class="scene-viewport" aria-label="双色 MOT 的六束光、线圈和原子"></div>
         <fieldset class="sequence-layers"><legend class="sr-only">三维图层</legend>
@@ -56,26 +56,32 @@
       <section id="sequence-imaging" aria-label="模拟相机成像"></section>
       <section class="sequence-readings" id="sequence-readings" aria-label="样本与转移效率">
         <h2>原子样本</h2>
+        <div class="sequence-population-head">
+          <div><span>估计阱内原子数</span><output id="seq-population">—</output></div>
+          <label>入射模拟轨迹数<select id="sequence-sample-count" name="n" form="sequence-inputs">
+            <option>96</option><option>192</option><option>384</option><option>768</option>
+            <option>1024</option><option>4096</option><option>8192</option><option selected>16384</option>
+          </select></label>
+        </div>
         <div class="sequence-stat-grid">
-          <div><span>当前阱内样本</span><output id="seq-count">—</output></div>
+          <div><span>当前阱内模拟轨迹</span><output id="seq-count">—</output></div>
           <div><span>动能温度</span><output><b id="seq-temperature">—</b> µK</output></div>
           <div><span>云团 RMS 半径</span><output><b id="seq-radius">—</b> mm</output></div>
         </div>
-        <table class="sequence-transfer"><thead><tr><th scope="col">观察时刻</th><th scope="col">留存样本</th><th scope="col">相对上一步</th></tr></thead><tbody>
-          <tr><th scope="row">关蓝前 N₀</th><td id="seq-n0">—</td><td>基准</td></tr>
-          <tr><th scope="row">纯绿接收后 N₁</th><td id="seq-n1">—</td><td id="seq-e1">—</td></tr>
-          <tr><th scope="row">压缩结束 N₂</th><td id="seq-n2">—</td><td id="seq-e2">—</td></tr>
+        <table class="sequence-transfer"><thead><tr><th scope="col">观察时刻</th><th scope="col">估计原子数</th><th scope="col">留存轨迹</th><th scope="col">阶段效率</th></tr></thead><tbody>
+          <tr><th scope="row"><button type="button" class="text-button" data-checkpoint="0">装载结束 N₀</button></th><td id="seq-atoms-n0">—</td><td id="seq-n0">—</td><td id="seq-e0">—</td></tr>
+          <tr><th scope="row"><button type="button" class="text-button" data-checkpoint="2">纯绿接收 N₁</button></th><td id="seq-atoms-n1">—</td><td id="seq-n1">—</td><td id="seq-e1">—</td></tr>
+          <tr><th scope="row"><button type="button" class="text-button" data-checkpoint="3">压缩结束 N₂</button></th><td id="seq-atoms-n2">—</td><td id="seq-n2">—</td><td id="seq-e2">—</td></tr>
         </tbody></table>
         <p class="sequence-total">转移和压缩合计 N₂ / N₀ <output id="seq-transfer">—</output></p>
         <p id="seq-window-note" class="sequence-note"></p>
-        <p class="sequence-loading"><span id="seq-loading-label">装载原子数估计</span> <output id="seq-population">—</output></p>
         <details class="sequence-loading-controls"><summary>入射通量与装载损失</summary>
           <form id="seq-loading-inputs">
             <label>入射通量 Φ / (原子/s)<input name="flux" type="number" min="0" max="1e15" step="any" value="1e9" required></label>
             <label>单体损失 α / s⁻¹<input name="alpha" type="number" min="0" max="1e4" step="any" value="0.53" required></label>
             <label>双体损失 β / (原子·s)⁻¹<input name="beta" type="number" min="0" max="1" step="any" value="1.7e-9" required></label>
           </form>
-          <p class="sequence-note">从空阱出发按 dN/dt = Φp − αN − βN² 计算，p 取装载样本留存比例。默认 α、β 来自宋博组双色 MOT 装载拟合，改变光场后可填入对应实测值。<a href="https://arxiv.org/html/2503.24383v2#S5" target="_blank" rel="noopener">论文表 II ↗</a></p>
+          <p class="sequence-note">Φ 默认取 10⁹ 原子/s。装载时按 dN/dt = Φp − αN − βN² 计算，p 为入射轨迹的捕获比例。交接和压缩时按留存比例换算原子数。α、β 默认取自宋博组的装载拟合，可替换为本装置的标定值。<a href="https://arxiv.org/html/2503.24383v2#S5" target="_blank" rel="noopener">论文表 II ↗</a></p>
         </details>
       </section>
     </div>
@@ -85,7 +91,6 @@
         <label>绿光束腰 / mm<input name="greenWaistMM" type="number" min="1" max="15" step="any" required></label>
         <label>冷束纵速均值 / (m/s)<input name="sourceSpeed" type="number" min="0" max="100" step="any" required></label>
         <label>冷束纵速标准差 / (m/s)<input name="sourceSpread" type="number" min="0" max="30" step="any" required></label>
-        <label>样本数<select name="n"><option>96</option><option selected>192</option><option>384</option><option>768</option></select></label>
         <label>随机种子<input name="seed" type="number" min="1" max="2147483647" step="1" required></label>
       </form>
       <p class="sequence-note" id="sequence-geometry"></p>
@@ -95,10 +100,199 @@
       <p>宋博组在双色装载时将 556 nm 设为蓝失谐。交接开始时，绿光跳至红失谐，399 nm 在 1 ms 内关闭。压缩时改变绿光失谐、降低功率并提高梯度。网页把论文的两对强光分配给 V1、V2，一对弱光分配给沿 Y 轴的 H。<a href="https://arxiv.org/pdf/2503.24383v2#page=3" target="_blank" rel="noopener">Li 等，第 V 节 ↗</a></p>
       <p>默认纯绿接收驻留 10 ms，弱光每束按强弱功率比例降至 14.9 µW。接收时长、磁场的线性响应和功率曲线都属于模型设定。两色共用基态，光力随各束高斯光强、多普勒频移、Zeeman 频移与偏振变化。积分包括重力与可选的随机光子反冲。</p>
       <p>装载阶段用最初 20 ms 的轨迹估计捕获概率，并用速率方程计算整个装载时段的原子数。交接和压缩逐步积分同一批留存原子。温度由扣除云团平均速度后的三维速度方差计算，RMS 半径由相对云心的三维位移计算。</p>
+      <p>WebGPU 并行积分各条轨迹，三维视图显示采样位置和相对荧光亮度，相机用每条阱内轨迹代表的原子数计算信号。提高轨迹数可降低捕获比例和云团分布的抽样波动。绝对原子数取决于入射通量、捕获率和损失系数。宋博组报告的压缩末态约为 10⁸ 个原子，转移和压缩合计损失约 10%。<a href="https://arxiv.org/html/2503.24383v2#S5" target="_blank" rel="noopener">Li 等，第 V 节 ↗</a></p>
       <p>成像视场以曝光结束时的磁场中心为原点。荧光使用阱内样本在曝光窗内的散射率，合并两种波长时采用相同的探测效率。弱探针吸收按柱密度计算透射光，再经过成像系统模糊并扣除暗场，得到光学厚度。图像给出相机的期望信号，未加入随机读出噪声、多重散射或探针反冲。<a href="https://arxiv.org/pdf/1509.03233#page=9" target="_blank" rel="noopener">Yamamoto 等，Yb 荧光探测效率 ↗</a> · <a href="https://arxiv.org/pdf/0707.2930#page=2" target="_blank" rel="noopener">Reinaudi 等，三帧吸收成像 ↗</a></p>
     </details>
     <p id="sequence-file-status" role="status"></p>
   </main>
+  <script type="text/wgsl" id="sequence-compute">
+struct Apparatus {
+  scalesBlue: vec4f,       // 2k/Γ, 2gμB/(ℏΓ), Γ/2, ℏk/m
+  scalesGreen: vec4f,
+  tensorGravity: vec4f,   // 四极场张量（T/m 每 G/cm）和重力加速度
+  biasRecoil: vec4f,      // 偏置场 T、反冲开关
+  axes: array<vec4f,3>,   // 斜光 V1、V2 和水平光 H 的轴向与偏振
+  waistsFinal: vec4f,     // 两色束腰平方的倒数，压缩结束时绿光的峰值饱和参数
+  peak: vec4f,            // 装载时蓝光（斜、水平）及绿光（斜、水平）
+  detuning: vec4f,        // 蓝光、绿光装载、接收、压缩的归一化失谐 2Δ/Γ
+  gradientsRamp: vec4f,   // 装载、接收、压缩末端的梯度及绿光功率波形
+}
+struct Atom {
+  pos: vec3f, live: u32,
+  vel: vec3f, held: u32,
+  rng: u32, pad0: u32, pad1: vec2u,
+}
+struct FramePlan {
+  flags: vec4u,           // 起点阶段、总步数、开始要求持续留存的步号、阶段末筛选
+  step: vec4f,            // dt 秒、起点在阶段的相对位置、每步的相对长度
+  endPeaks: vec4f,
+  endFields: vec4f,       // 两色帧末失谐和帧末梯度，含阶段边沿突变
+}
+struct OutputSample {
+  positionLive: vec4f, velocityTrapped: vec4f, rates: vec4f,
+}
+struct Channels { peak: vec4f, detuning: vec2f, gradient: f32 }
+struct LineRates { positive: vec3f, negative: vec3f }
+struct Radiation {
+  acc: vec3f, bluePairs: vec3f, greenPlus: vec3f, greenMinus: vec3f,
+  blueTotal: f32, greenTotal: f32,
+}
+@group(0) @binding(0) var<storage,read> lab: Apparatus;
+@group(0) @binding(1) var<storage,read_write> particles: array<Atom>;
+@group(0) @binding(2) var<storage,read> plans: array<FramePlan>;
+@group(0) @binding(3) var<storage,read_write> history: array<OutputSample>;
+@group(0) @binding(4) var<uniform> batch: vec4u; // 当前帧、页内帧位置、起点步号、本次积分步数
+
+fn channels(stage: u32, fraction: f32) -> Channels {
+  let u = clamp(fraction, 0.0, 1.0);
+  var c = Channels(lab.peak, lab.detuning.xy, lab.gradientsRamp.x);
+  if (stage == 0u) { return c; }
+  c.detuning.y = lab.detuning.z;
+  if (stage == 1u) {
+    c.peak = vec4f((1.0-u)*lab.peak.xy, lab.peak.zw);
+    c.gradient = mix(lab.gradientsRamp.x, lab.gradientsRamp.y, u);
+  } else {
+    c.peak = vec4f(0.0, 0.0, lab.peak.zw);
+    c.gradient = lab.gradientsRamp.y;
+    if (stage == 3u) {
+      c.detuning.y = lab.detuning.w;
+      var green = lab.peak.zw;
+      if (lab.gradientsRamp.w == 2.0) {
+        if (any(green > vec2f(0.0))) { green *= pow(lab.waistsFinal.zw / green, vec2f(u)); }
+      } else {
+        let ramp = select(u, u*u*(3.0-2.0*u), lab.gradientsRamp.w == 1.0);
+        green = mix(green, lab.waistsFinal.zw, ramp);
+      }
+      c.peak = vec4f(0.0, 0.0, green);
+      c.gradient = mix(lab.gradientsRamp.y, lab.gradientsRamp.z, u);
+    }
+  }
+  return c;
+}
+
+fn lineRates(peaks: vec2f, inverseWaist2: f32, scales: vec4f, detuning: f32,
+             r2: vec3f, alongVelocity: vec3f, b: f32,
+             wPlus: vec3f, wPi: vec3f, wMinus: vec3f) -> LineRates {
+  if (all(peaks == vec2f(0.0))) { return LineRates(vec3f(0.0),vec3f(0.0)); }
+  let s = vec3f(peaks.x,peaks.x,peaks.y) * exp(-2.0 * inverseWaist2 * r2);
+  let sat = 1.0 + 2.0 * dot(s, vec3f(1.0));
+  let doppler = scales.x * alongVelocity;
+  let zeeman = scales.y * b;
+  let f = detuning - doppler;
+  let r = detuning + doppler;
+  let fp = f - zeeman; let fm = f + zeeman;
+  let rp = r - zeeman; let rm = r + zeeman;
+  let positive = wPlus/(sat+fp*fp) + wPi/(sat+f*f) + wMinus/(sat+fm*fm);
+  let negative = wMinus/(sat+rp*rp) + wPi/(sat+r*r) + wPlus/(sat+rm*rm);
+  return LineRates(scales.z*s*positive, scales.z*s*negative);
+}
+
+fn radiation(pos: vec3f, vel: vec3f, c: Channels, axes: mat3x3f, helicity: vec3f) -> Radiation {
+  let projections = transpose(axes);
+  let parallel = projections * pos;
+  let r2 = max(vec3f(0.0), dot(pos,pos) - parallel*parallel);
+  let projectedV = projections * vel;
+  let field = c.gradient * lab.tensorGravity.xyz * pos + lab.biasRecoil.xyz;
+  let b = length(field);
+  var cosine = vec3f(0.0);
+  if (b > 0.0) { cosine = clamp(projections * (field/b),vec3f(-1.0),vec3f(1.0)); }
+  let hc = helicity * cosine;
+  let wp = 0.25*(1.0+hc)*(1.0+hc);
+  let wm = 0.25*(1.0-hc)*(1.0-hc);
+  let wz = 0.5*(1.0-cosine*cosine);
+  let blue = lineRates(c.peak.xy,lab.waistsFinal.x,lab.scalesBlue,c.detuning.x,r2,projectedV,b,wp,wz,wm);
+  let green = lineRates(c.peak.zw,lab.waistsFinal.y,lab.scalesGreen,c.detuning.y,r2,projectedV,b,wp,wz,wm);
+  let bp = blue.positive + blue.negative;
+  let rb = dot(bp,vec3f(1.0)); let rg = dot(green.positive+green.negative,vec3f(1.0));
+  let fb = 0.5*rb/lab.scalesBlue.z; let fg = 0.5*rg/lab.scalesGreen.z;
+  let norm = 1.0-fb*fg;
+  let sb = (1.0-fg)/norm; let sg = (1.0-fb)/norm;
+  let acc = axes * (lab.scalesBlue.w*sb*(blue.positive-blue.negative)
+                  + lab.scalesGreen.w*sg*(green.positive-green.negative));
+  return Radiation(acc+vec3f(0.0,0.0,lab.tensorGravity.w),sb*bp,sg*green.positive,sg*green.negative,rb*sb,rg*sg);
+}
+
+fn uniformRandom(state: ptr<function,u32>) -> f32 {
+  *state += 0x6D2B79F5u;
+  var v = (*state ^ (*state >> 15u)) * (1u | *state);
+  v ^= v + ((v ^ (v >> 7u)) * (61u | v));
+  return min(f32(v ^ (v >> 14u)) * (1.0 / 4294967296.0), 0.99999994);
+}
+fn normals(state: ptr<function,u32>) -> vec2f {
+  let amp = sqrt(-2.0*log(max(uniformRandom(state),1e-15)));
+  let a = 6.28318530718*uniformRandom(state);
+  return amp*vec2f(cos(a),sin(a));
+}
+fn recoilKick(r: Radiation, dt: f32, axes: mat3x3f, rng: ptr<function,u32>) -> vec3f {
+  var kick = vec3f(0.0);
+  if (r.blueTotal > 0.0) {
+    let n01 = normals(rng); let n23 = normals(rng); let n45 = normals(rng);
+    kick = lab.scalesBlue.w * (axes*(sqrt(r.bluePairs*dt)*vec3f(n01,n23.x))
+         + sqrt(r.blueTotal*dt/3.0)*vec3f(n23.y,n45));
+  }
+  if (r.greenTotal > 0.0) {
+    kick -= dt*lab.scalesGreen.w*(axes*(r.greenPlus-r.greenMinus));
+    let limit = exp(-r.greenTotal*dt);
+    var product = uniformRandom(rng);
+    while (product > limit) {
+      var threshold = r.greenTotal*uniformRandom(rng);
+      var direction = -axes[2];
+      for (var axis=0u; axis<3u; axis++) {
+        if (threshold < r.greenPlus[axis]) { direction = axes[axis]; break; }
+        threshold -= r.greenPlus[axis];
+        if (threshold < r.greenMinus[axis]) { direction = -axes[axis]; break; }
+        threshold -= r.greenMinus[axis];
+      }
+      let z = 2.0*uniformRandom(rng)-1.0;
+      let phi = 6.28318530718*uniformRandom(rng);
+      let radial = sqrt(max(0.0,1.0-z*z));
+      kick += lab.scalesGreen.w*(direction-vec3f(radial*cos(phi),radial*sin(phi),z));
+      product *= uniformRandom(rng);
+    }
+  }
+  return kick;
+}
+fn inside(pos: vec3f, vel: vec3f) -> bool {
+  return dot(pos,pos)<0.003*0.003 && dot(vel,vel)<1.0;
+}
+
+@compute @workgroup_size(32)
+fn advance(@builtin(global_invocation_id) invocation: vec3u) {
+  let id = invocation.x;
+  let n = arrayLength(&particles);
+  if (id >= n) { return; }
+  let plan = plans[batch.x];
+  let endStep = batch.z+batch.w;
+  let a = lab.axes;
+  let axes = mat3x3f(a[0].xyz,a[1].xyz,a[2].xyz);
+  let helicity = vec3f(a[0].w,a[1].w,a[2].w);
+  var p = particles[id];
+  let dt = plan.step.x;
+  for (var step=batch.z; step<endStep && p.live!=0u; step++) {
+    if (step>=plan.flags.z && !inside(p.pos,p.vel)) { p.held=0u; }
+    let u = plan.step.y+f32(step)*plan.step.z;
+    let start = radiation(p.pos,p.vel,channels(plan.flags.x,u),axes,helicity);
+    let midPos = p.pos+0.5*dt*p.vel; let midVel = p.vel+0.5*dt*start.acc;
+    let mid = radiation(midPos,midVel,channels(plan.flags.x,u+0.5*plan.step.z),axes,helicity);
+    p.pos += dt*midVel; p.vel += dt*mid.acc;
+    if (lab.biasRecoil.w!=0.0) { p.vel += recoilKick(mid,dt,axes,&p.rng); }
+    if (dot(p.pos,p.pos)>0.15*0.15) { p.live=0u; }
+    if (step+1u>=plan.flags.z && !inside(p.pos,p.vel)) { p.held=0u; }
+  }
+  if (endStep==plan.flags.y) {
+    if (plan.flags.w!=0u) { p.live &= p.held; p.held=1u; }
+    var rates = vec2f(0.0);
+    if (p.live!=0u) {
+      let end = Channels(plan.endPeaks,plan.endFields.xy,plan.endFields.z);
+      let r = radiation(p.pos,p.vel,end,axes,helicity);
+      rates = vec2f(r.blueTotal,r.greenTotal);
+    }
+    history[batch.y*n+id] = OutputSample(vec4f(p.pos,f32(p.live)),
+      vec4f(p.vel,f32(p.live!=0u && inside(p.pos,p.vel))),vec4f(rates,0.0,0.0));
+  }
+  particles[id] = p;
+}
+  </script>
   <script type="module" src="./sequence-app.js" onerror="if (location.protocol === 'file:') document.getElementById('sequence-file-entry').hidden = false"></script>
 </body>
 </html>

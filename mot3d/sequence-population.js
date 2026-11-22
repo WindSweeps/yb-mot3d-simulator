@@ -31,3 +31,20 @@ export function loadPopulation(timeMS, flux, captureProbability, alpha, beta) {
   const scaledPopulation = rate / scale;
   return Number.isFinite(scaledPopulation) ? scaledPopulation * fraction : (rate * fraction) / scale;
 }
+
+// 装载期从空阱连续注入。交接时给每条留存轨迹赋相同权重，并沿用到压缩结束。
+export function sequencePopulation(durationMS, incident, captured, {flux, alpha, beta}) {
+  if (!Number.isInteger(incident) || incident < 1 || !Number.isInteger(captured) || captured < 0 || captured > incident)
+    throw new RangeError('捕获轨迹数须在零和入射轨迹总数之间。');
+  const p = captured / incident;
+  const loaded = loadPopulation(durationMS, flux, p, alpha, beta);
+  const transferWeight = captured > 0 ? loaded / captured : 0;
+  function at(timeMS, trapped) {
+    return timeMS < durationMS ? loadPopulation(timeMS, flux, p, alpha, beta) : transferWeight * trapped;
+  }
+  function weightAt(timeMS, trapped) {
+    if (timeMS >= durationMS) return transferWeight;
+    return trapped > 0 ? at(timeMS, trapped) / trapped : 0;
+  }
+  return {at, weightAt, loaded, transferWeight};
+}

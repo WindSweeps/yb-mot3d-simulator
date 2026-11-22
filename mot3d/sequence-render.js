@@ -35,10 +35,10 @@ export function createSequenceRender(beamGroup, atomGroup, trailGroup, addLabel)
 
   const cloud = new THREE.Points(new THREE.BufferGeometry(), new THREE.ShaderMaterial({
     uniforms: { viewportHeight: {value: 1}, pixelRatio: {value: 1}, fluorescence: {value: true},
-      blueOn: {value: true}, greenOn: {value: true}, sampleWeight: {value: 1} },
+      blueOn: {value: true}, greenOn: {value: true}, sampleWeight: {value: 1}, sampleDiameter: {value: 1} },
     vertexShader: `
       attribute vec2 scattering;
-      uniform float viewportHeight, pixelRatio, sampleWeight;
+      uniform float viewportHeight, pixelRatio, sampleWeight, sampleDiameter;
       uniform bool fluorescence, blueOn, greenOn;
       varying vec3 light;
       varying float alpha;
@@ -53,6 +53,7 @@ export function createSequenceRender(beamGroup, atomGroup, trailGroup, addLabel)
         gl_Position = projectionMatrix * mv;
         gl_PointSize = clamp(0.30 * projectionMatrix[1][1] * viewportHeight * 0.5 / max(-mv.z,0.01),
                              (fluorescence ? 6.0 : 4.0) * pixelRatio, 50.0 * pixelRatio);
+        if (fluorescence) gl_PointSize *= sampleDiameter;
       }`,
     fragmentShader: `
       varying vec3 light;
@@ -109,6 +110,11 @@ export function createSequenceRender(beamGroup, atomGroup, trailGroup, addLabel)
     const n = alive.length;
     if (positionsM.length !== 3*n || blueRates.length !== n || greenRates.length !== n)
       throw new RangeError('时序场景的粒子位置与散射率数量不一致。');
+    // 固定入射系综下，每个标记的总亮度按 1/n 归一。分配给透明度与面积，可避免高采样时单个像素的贡献低于显示精度。
+    const referenceCount = 192, referenceAlpha = Math.sqrt(32/referenceCount);
+    const opacity = Math.min(1, Math.sqrt(32/n));
+    uniforms.sampleWeight.value = sample.incidentFlux === 0 ? 0 : opacity;
+    uniforms.sampleDiameter.value = Math.sqrt(referenceCount*referenceAlpha/(n*opacity));
     if (positionsM.buffer === buffer && positionsM.byteOffset === offset && positionsM.length === length) {
       if (!sample.previousPositionsM) tails.geometry.setDrawRange(0, 0);
       return false;
@@ -141,7 +147,6 @@ export function createSequenceRender(beamGroup, atomGroup, trailGroup, addLabel)
     trailPositions.needsUpdate = vertices > 0;
     cloud.geometry.setDrawRange(0, visible);
     tails.geometry.setDrawRange(0, vertices);
-    uniforms.sampleWeight.value = Math.min(1, Math.sqrt(32 / Math.max(1,n)));
     return true;
   }
   return { setFrame, cloud, tails };

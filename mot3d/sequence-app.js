@@ -3,7 +3,7 @@ import { compileSequence, sequenceAt, songSequence } from './sequence.js';
 import { mountSequenceEditor } from './sequence-ui.js';
 import { mountScene } from './render.js';
 import { DEFAULT_FLUX } from './fluorescence.js';
-import { loadPopulation } from './sequence-population.js';
+import { sequencePopulation } from './sequence-population.js';
 import { fluorescenceExposure, sequenceFrameAt } from './sequence-exposure.js';
 import { mountImagingPanel, validateImagingSettings } from './sequence-imaging-view.js';
 import { mountSequenceDock } from './sequence-dock.js';
@@ -18,19 +18,23 @@ const loadingFields = Array.from(loadingForm.elements);
 const formatId = 'yb-mot-sequence-v1';
 const blank = '—';
 const maxFileBytes = 256000;
-let params = initialInputs(), program = compileSequence(songSequence()), timeMS = 0;
+const atomFormat = new Intl.NumberFormat('zh-CN', {notation:'compact', maximumSignificantDigits:3});
+const computeShader = $('#sequence-compute').textContent;
+let params = await initialInputs(), program = compileSequence(songSequence()), timeMS = 0;
 let geometry = derive(params);
 const referenceLoss = { flux:params.incidentFlux ?? DEFAULT_FLUX, alpha:.53, beta:1.7e-9 };
 let loading = { ...referenceLoss };
-let worker = null, timer = 0, job = 0, result = null, scene = null;
+let worker = null, timer = 0, job = 0, result = null, scene = null, population = null;
 let editValid = true, suspended = false, started = 0;
 
-function initialInputs() {
+async function initialInputs() {
   let previous;
   try { previous = JSON.parse(sessionStorage.getItem('yb-mot3d-sequence-inputs')) || {}; }
   catch { previous = {}; }
   const base = { ...DEFAULTS, ...previous };
-  const n = [96,192,384,768].includes(base.n) ? base.n : DEFAULTS.n;
+  // 双色序列单独设置采样数；实验文件导入时使用文件中明确保存的数量。
+  const adapter = await navigator.gpu?.requestAdapter().catch(() => null);
+  const n = adapter ? (matchMedia('(max-width: 800px)').matches ? 4096 : 16384) : 1024;
   return { ...base, n, greenWaistMM: base.waistMM };
 }
 
@@ -53,23 +57,27 @@ function numberOrBlank(x, digits) {
 
 function efficiency(a, b) { return b > 0 ? (a / b * 100).toFixed(1) + '%' : blank; }
 
-function loadingPopulation(t) {
-  return loadPopulation(Math.min(t, program.stages[0].durationMS), loading.flux, result.summary.N0 / result.n, loading.alpha, loading.beta);
-}
-
-function showLoadingPopulation() {
-  const duration = program.stages[0].durationMS;
-  $('#seq-loading-label').textContent = timeMS < duration ? '此时装载原子数估计' : '关蓝前装载原子数估计';
-  const count = result && loadingForm.checkValidity()
-    ? loadingPopulation(timeMS)
-    : null;
-  $('#seq-population').textContent = count === null ? blank :
-    count.toLocaleString('zh-CN', { maximumSignificantDigits:3, notation:count >= 100000 ? 'scientific' : 'standard' }) + ' 个';
+function showAtoms(output, count) {
+  output.textContent = Number.isFinite(count) ? atomFormat.format(count) : blank;
+  if (Number.isFinite(count)) {
+    output.dataset.atoms = String(count);
+    output.title = Math.round(count).toLocaleString('zh-CN') + ' 个原子（模型估计）';
+  } else {
+    delete output.dataset.atoms;
+    output.removeAttribute('title');
+  }
 }
 
 function summarize() {
   const counts = result?.summary;
-  for (const key of ['N0','N1','N2']) $('#seq-' + key.toLowerCase()).textContent = counts?.[key] ?? blank;
+  population = result && loadingForm.checkValidity()
+    ? sequencePopulation(program.stages[0].durationMS, result.n, counts.N0, loading) : null;
+  for (const key of ['N0','N1','N2']) {
+    const suffix = key.toLowerCase();
+    $('#seq-' + suffix).textContent = counts?.[key] ?? blank;
+    showAtoms($('#seq-atoms-' + suffix), population && population.transferWeight * counts[key]);
+  }
+  $('#seq-e0').textContent = efficiency(counts?.N0, result?.n);
   $('#seq-e1').textContent = efficiency(counts?.N1, counts?.N0);
   $('#seq-e2').textContent = efficiency(counts?.N2, counts?.N1);
   $('#seq-transfer').textContent = efficiency(counts?.N2, counts?.N0);
@@ -81,7 +89,7 @@ function showFrame(t) {
   $('#sequence-stage-text').textContent = program.stages[channels.stageIndex].label +
     ' · ' + numberOrBlank(timeMS, 2) + ' ms';
   let metric, f;
-  const sample = { ...channels, greenWaistMM:params.greenWaistMM, positionsM:null };
+  const sample = { ...channels, greenWaistMM:params.greenWaistMM, incidentFlux:loading.flux, positionsM:null };
   if (result) {
     f = sequenceFrameAt(result.timesMS, timeMS);
     const start = f * result.n, end = start + result.n;
@@ -102,7 +110,9 @@ function showFrame(t) {
   $('#seq-count').textContent = metric?.count ?? blank;
   $('#seq-temperature').textContent = numberOrBlank(metric?.temperatureUK, 1);
   $('#seq-radius').textContent = numberOrBlank(metric?.rmsRadiusMM, 3);
-  showLoadingPopulation();
+  const count = population && population.at(timeMS, metric.count);
+  showAtoms($('#seq-population'), count);
+  $('#seq-scene-population').textContent = Number.isFinite(count) ? '估计阱内 ' + atomFormat.format(count) + ' 个原子' : '';
   const windowMS = Math.min(20, program.stages[0].durationMS);
   const onPlateau = channels.stageId === 'load' && timeMS > windowMS;
   $('#seq-window-note').textContent = onPlateau
@@ -114,15 +124,9 @@ function showImaging(sceneSample, f) {
   const endMS = timeMS, stage = program.stages[sceneSample.stageIndex];
   const centerMM = magneticCenterMM(sceneSample.gradientGCM, geometry.mainTensor, geometry.biasG) ?? [0, 0, 0];
   const context = { timeMS:endMS, sampledAtMS:endMS, stageLabel:stage.label, sample:{positionsM:null, centerMM} };
-  if (result && loadingForm.checkValidity()) {
-    const trajectory = result, loadMS = program.stages[0].durationMS, n0 = trajectory.summary.N0;
-    const {flux, alpha, beta} = loading, probability = n0 / trajectory.n;
-    const finalWeight = n0 ? loadPopulation(loadMS, flux, probability, alpha, beta) / n0 : 0;
-    function weightAt(frame, t) {
-      if (t >= loadMS) return finalWeight;
-      const count = trajectory.metrics[frame].count;
-      return count ? loadPopulation(t, flux, probability, alpha, beta) / count : 0;
-    }
+  if (result && population) {
+    const trajectory = result, estimate = population;
+    const weightAt = (frame, t) => estimate.weightAt(t, trajectory.metrics[frame].count);
     context.sampledAtMS = trajectory.timesMS[f];
     context.weight = weightAt(f, endMS);
     context.sample = { ...sceneSample, centerMM, weight:context.weight, alive:trajectory.trapped.subarray(f * trajectory.n, (f + 1) * trajectory.n) };
@@ -200,12 +204,19 @@ function recalculate() {
     worker.onmessage = ({data}) => {
       if (data.id !== job || data.id !== id) return;
       if (data.error) { fail(data.error); return; }
+      if (!data.result) {
+        const progress = Math.round(100 * data.progress);
+        status(data.backend + ' · 正在积分 ' + params.n.toLocaleString('zh-CN') + ' 条轨迹 · ' +
+          progress + '%' + (data.reason ? ' · ' + data.reason : ''));
+        return;
+      }
       result = data.result;
       worker.terminate(); worker = null;
       summarize(); showFrame(timeMS); editor.setEnabled(true);
-      status('计算完成 · ' + result.n + ' 个入射样本 · ' + ((performance.now() - started) / 1000).toFixed(2) + ' s');
+      status('计算完成 · ' + result.backend + ' · ' + result.n.toLocaleString('zh-CN') + ' 条入射轨迹 · ' +
+        ((performance.now() - started) / 1000).toFixed(2) + ' s');
     };
-    worker.postMessage({id, params, config:program.config});
+    worker.postMessage({id, params, config:program.config, shader:computeShader});
   }, 140);
 }
 
@@ -227,6 +238,9 @@ function initializeScene() {
 
 $('#sequence-export').addEventListener('click', () => {
   const file = { format:formatId, config:editor.getConfig(), params, loading, imaging:imaging.getSettings(), summary:result?.summary ?? null };
+  if (population) {
+    file.estimatedAtoms = Object.fromEntries(Object.entries(result.summary).map(([key, n]) => [key, n * population.transferWeight]));
+  }
   const url = URL.createObjectURL(new Blob([JSON.stringify(file, null, 2)], {type:'application/json'}));
   const a = document.createElement('a'); a.href = url; a.download = 'yb-mot-sequence.json';
   document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -273,11 +287,17 @@ for (const button of document.querySelectorAll('[data-seq-view]')) button.addEve
 });
 for (const layer of document.querySelectorAll('[data-seq-layer]')) layer.addEventListener('change', updateLayers);
 form.addEventListener('input', recalculate);
+$('#sequence-sample-count').addEventListener('input', recalculate);
+for (const button of document.querySelectorAll('[data-checkpoint]')) button.addEventListener('click', () => {
+  editor.pause();
+  editor.setTime(program.stages[Number(button.dataset.checkpoint)].endMS);
+});
 form.addEventListener('submit', event => event.preventDefault());
 loadingForm.addEventListener('input', () => {
   if (loadingForm.checkValidity()) {
     loading = Object.fromEntries(loadingFields.map(field => [field.name, field.valueAsNumber]));
   }
+  summarize();
   $('#sequence-export').disabled = !form.checkValidity() || !editValid || !loadingForm.checkValidity() || !imaging.isValid();
   showFrame(timeMS);
 });

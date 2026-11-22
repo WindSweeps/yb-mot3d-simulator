@@ -16,6 +16,12 @@
 .sequence-scene-status { padding:6px 18px 12px; font-size:var(--meta); color:var(--muted); min-height:34px; }
 .sequence-readings,.sequence-apparatus,.sequence-method { border:1px solid var(--line); border-radius:8px; background:var(--panel); padding:16px 18px; }
 .sequence-stat-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); margin:12px 0; gap:8px; }
+.sequence-population-head { display:flex; align-items:flex-end; justify-content:space-between; flex-wrap:wrap; gap:8px 16px; padding-bottom:12px; border-bottom:1px solid var(--line); }
+.sequence-population-head > div,.sequence-population-head label { display:grid; gap:3px; color:var(--muted); font-size:var(--meta); }
+.sequence-population-head output { color:var(--lime); font:600 var(--title)/1.3 var(--mono); }
+.sequence-population-head select { font-size:var(--meta); }
+.sequence-transfer .text-button { padding-block:4px; font:inherit; }
+.sequence-page #seq-scene-population { color:var(--lime); }
 .sequence-stat-grid span,.sequence-stat-grid output { display:block; }
 .sequence-stat-grid span,.sequence-note,.sequence-method p,.sequence-apparatus p { color:var(--muted); font-size:var(--meta); }
 .sequence-stat-grid output { color:var(--text); font:var(--meta)/1.65 var(--mono); overflow-wrap:anywhere; }

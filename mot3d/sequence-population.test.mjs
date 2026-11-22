@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { loadPopulation } from './sequence-population.js';
+import { loadPopulation, sequencePopulation } from './sequence-population.js';
 
 function near(actual, expected, tolerance = 2e-13) {
   assert.ok(Math.abs(actual - expected) <= tolerance * Math.abs(expected), `${actual} ≠ ${expected}`);
@@ -33,6 +33,15 @@ near(loadPopulation(1e-17, flux, p, alpha, beta), rate * 1e-20);
 near(loadPopulation(1, 1e308, 1, 1e-300, 0), 1e305);
 near(loadPopulation(1e-322, 1e308, 1, 0, 0), 1e305 * 1e-322);
 near(loadPopulation(100000, 1e308, 1, 1e308, 1e308), (Math.sqrt(5) - 1) / 2);
+const lossless = {flux: 1e9, alpha: 0, beta: 0};
+const population = sequencePopulation(5000, 4000, 1000, lossless);
+assert.equal(population.at(1000, 70), 2.5e8);
+assert.equal(population.at(5000, 1000), 1.25e9);
+assert.equal(population.at(5111, 800), 1e9);
+assert.equal(population.weightAt(5111, 800) * 800, 1e9);
+assert.equal(sequencePopulation(5000, 8000, 2000, lossless).at(5111, 1600), 1e9);
+assert.equal(sequencePopulation(5000, 4000, 0, lossless).at(5111, 0), 0);
+assert.equal(sequencePopulation(5000, 4000, 1000, {...lossless, flux:0}).at(5111, 800), 0);
 for (const [index, value] of [[0, -1], [1, Infinity], [2, -1], [2, 1.1], [3, NaN], [4, -.1]]) {
   const args = [100, flux, p, alpha, beta]; args[index] = value;
   assert.throws(() => loadPopulation(...args), RangeError);

@@ -2,7 +2,7 @@ import { BEAM_DIRECTIONS, BLUE_TRANSITION, CONSTANTS as C, compile, evaluate, ra
 import { compileSequence, sequenceAt } from './sequence.js';
 
 const greenK = 2 * Math.PI / 555.8e-9;
-const GREEN = { k: greenK, gamma: 2 * Math.PI * 180000, lande: 1.5, recoil: C.hbar * greenK / C.mass };
+export const GREEN_TRANSITION = Object.freeze({ k: greenK, gamma: 2 * Math.PI * 180000, lande: 1.5, recoil: C.hbar * greenK / C.mass });
 const radius = .003, domain = .15;
 
 function line(model, transition, waistMM) {
@@ -19,7 +19,7 @@ function line(model, transition, waistMM) {
 
 function lightField(model) {
   const {waistMM,greenWaistMM = waistMM} = model.params;
-  return { blue: line(model, BLUE_TRANSITION, waistMM), green: line(model, GREEN, greenWaistMM) };
+  return { blue: line(model, BLUE_TRANSITION, waistMM), green: line(model, GREEN_TRANSITION, greenWaistMM) };
 }
 
 function configureLine(c, detuningMHz, powers, gradient, gate) {
@@ -52,7 +52,7 @@ function scattering(pos, vel, field, s) {
   const rb = evaluateLine(pos, vel, field.blue, s.blue, s.saturation);
   const rg = evaluateLine(pos, vel, field.green, s.green, s.saturation);
   // 两个有效跃迁共享基态。分别保留单色平衡比 f/(1-f)，再用总布居为一归一化。
-  const fb = rb / BLUE_TRANSITION.gamma, fg = rg / GREEN.gamma, norm = 1 - fb * fg;
+  const fb = rb / BLUE_TRANSITION.gamma, fg = rg / GREEN_TRANSITION.gamma, norm = 1 - fb * fg;
   const sb = (1 - fg) / norm, sg = (1 - fb) / norm;
   for (let j = 0; j < 9; j++) { s.blue[j] *= sb; s.green[j] *= sg; }
   for (let j = 0; j < 3; j++) s.acceleration[j] = s.blue[j] + s.green[j];
@@ -87,9 +87,9 @@ function recoil(velocity, dt, s, rng) {
       while (j < 5 && r >= s.green[3+j]) r -= s.green[3+j++];
       const z = 2 * rng.uniform() - 1, phi = 2 * Math.PI * rng.uniform(), radial = Math.sqrt(1-z*z);
       const d = BEAM_DIRECTIONS[j];
-      velocity[0] += GREEN.recoil * (d[0] - radial * Math.cos(phi));
-      velocity[1] += GREEN.recoil * (d[1] - radial * Math.sin(phi));
-      velocity[2] += GREEN.recoil * (d[2] - z);
+      velocity[0] += GREEN_TRANSITION.recoil * (d[0] - radial * Math.cos(phi));
+      velocity[1] += GREEN_TRANSITION.recoil * (d[1] - radial * Math.sin(phi));
+      velocity[2] += GREEN_TRANSITION.recoil * (d[2] - z);
     }
   }
 }
@@ -123,42 +123,102 @@ function atomFrom(initial, i, seed) {
     rng: random((seed ^ Math.imul(i + 1, 0x9E3779B1) ^ 0xA341316C) >>> 0), live: true, held: true };
 }
 
-export function simulateSequence(input, config, options = {}) {
-  const start = performance.now(), model = compile(input);
-  const { n, seed, dtUS } = model.params;
+export function prepareSequenceRun(input, config, options = {}) {
+  const model = compile(input), field = lightField(model);
+  const { n } = model.params;
   const program = compileSequence(config), { grid, loadEnd } = observationGrid(program);
   const initial = options.initialStates ? Float64Array.from(options.initialStates) : sampleInitialStates(model.params);
   if (initial.length !== n*6 || initial.some(x => !Number.isFinite(x))) throw new RangeError('时序初始相空间尺寸或数值无效。');
-  const atoms = Array.from({ length: n }, (_, i) => atomFrom(initial, i, seed));
-  const samples = n * grid.length, timesMS = Float64Array.from(grid, point => point.time);
-  const positionsM = new Float32Array(samples * 3), alive = new Uint8Array(samples), trapped = new Uint8Array(samples);
-  const blueRates = new Float32Array(samples), greenRates = new Float32Array(samples);
-  const metrics = [], counts = { N0: 0, N1: 0, N2: 0 };
-  const first = lightField(model), middle = lightField(model), s = scratch();
+  const samples = n * grid.length;
+  const result = {
+    n, frameCount:grid.length, stages:program.stages, loadWindowMS:loadEnd,
+    timesMS:Float64Array.from(grid, point => point.time),
+    positionsM:new Float32Array(samples * 3), alive:new Uint8Array(samples), trapped:new Uint8Array(samples),
+    blueRates:new Float32Array(samples), greenRates:new Float32Array(samples),
+    metrics:[], summary:{N0:0, N1:0, N2:0},
+  };
+  return {model, field, program, grid, loadEnd, initial, result};
+}
+
+function frameMoments() {
+  return {count:0, live:0, width:0, thermal:0, center:[0,0,0], meanV:[0,0,0]};
+}
+
+function writeAtom(result, k, pos, offsetP, vel, offsetV, live, trapped, blueRate, greenRate, m) {
+  result.positionsM[3*k] = pos[offsetP];
+  result.positionsM[3*k+1] = pos[offsetP+1];
+  result.positionsM[3*k+2] = pos[offsetP+2];
+  if (!live) return;
+  m.live++;
+  result.alive[k] = 1;
+  result.blueRates[k] = blueRate;
+  result.greenRates[k] = greenRate;
+  if (!trapped) return;
+  result.trapped[k] = 1;
+  m.count++;
+  for (let a = 0; a < 3; a++) {
+    const mm = 1000 * pos[offsetP+a], speed = vel[offsetV+a];
+    const dx = mm - m.center[a], dv = speed - m.meanV[a];
+    m.center[a] += dx/m.count;
+    m.meanV[a] += dv/m.count;
+    m.width += dx * (mm - m.center[a]);
+    m.thermal += dv * (speed - m.meanV[a]);
+  }
+}
+
+function finishFrame(run, frame, m) {
+  const {count, center, width, thermal} = m, checkpoint = run.grid[frame].checkpoint;
+  if (checkpoint) run.result.summary[checkpoint] = m.live;
+  run.result.metrics.push({
+    count, centroidMM:count ? center : null,
+    rmsRadiusMM:count ? Math.sqrt(Math.max(0,width)/count) : null,
+    temperatureUK:count > 1 ? C.mass*Math.max(0,thermal)*1e6/(3*C.kB*(count-1)) : null,
+  });
+}
+
+// 每个粒子的三个 vec4 顺序为位置／存活、速度／阱内判据、两色散射率。
+export function writeSequenceGPUFrames(run, data, firstFrame, frameCount) {
+  const {result} = run;
+  if (firstFrame !== result.metrics.length || !Number.isInteger(frameCount) || frameCount < 1 ||
+      firstFrame + frameCount > result.frameCount ||
+      data.length < 12 * result.n * frameCount) throw new RangeError('GPU 返回的时序帧范围或长度无效。');
+  for (let f = firstFrame; f < firstFrame + frameCount; f++) {
+    const m = frameMoments();
+    for (let i = 0; i < result.n; i++) {
+      const offset = 12 * ((f - firstFrame) * result.n + i);
+      const live = data[offset+3], trapped = data[offset+7];
+      const blueRate = data[offset+8], greenRate = data[offset+9];
+      if (!Number.isFinite(data[offset]+data[offset+1]+data[offset+2]+data[offset+4]+data[offset+5]+
+          data[offset+6]+blueRate+greenRate) || blueRate < 0 || greenRate < 0 || (live !== 0 && live !== 1) ||
+          (trapped !== 0 && trapped !== 1) || trapped > live) throw new Error('GPU 时序帧的相空间、散射率或留存标记无效。');
+      writeAtom(result, f*result.n + i, data, offset, data, offset+4, live, trapped, blueRate, greenRate, m);
+    }
+    finishFrame(run, f, m);
+  }
+}
+
+export function finishSequenceRun(run, started) {
+  if (run.result.metrics.length !== run.result.frameCount) throw new Error('时序输出帧不完整。');
+  return Object.assign(run.result, run.result.summary, {elapsedMS:performance.now()-started});
+}
+
+export function simulateSequence(input, config, options = {}) {
+  const start = performance.now(), run = prepareSequenceRun(input,config,options);
+  const {model, program, grid, initial, result} = run;
+  const {n, seed, dtUS} = model.params;
+  const atoms = Array.from({ length:n }, (_, i) => atomFrom(initial, i, seed));
+  const first = run.field, middle = lightField(model), s = scratch();
   const hp = new Float64Array(3), hv = new Float64Array(3);
 
   function frame(f) {
     configure(first, sequenceAt(program, grid[f].time));
-    let count = 0, width = 0, thermal = 0;
-    const meanV = [0,0,0], center = [0,0,0];
+    const m = frameMoments();
     for (let i = 0; i < n; i++) {
       const {p, v, live} = atoms[i], k = f*n + i;
-      positionsM.set(p, 3*k);
-      if (!live) continue;
-      alive[k] = 1;
-      scattering(p, v, first, s);
-      blueRates[k] = s.blueRate; greenRates[k] = s.greenRate;
-      if (!inside(p,v)) continue;
-      trapped[k] = 1;
-      count++;
-      for (let a = 0; a < 3; a++) {
-        const mm = 1000 * p[a], dx = mm - center[a], dv = v[a] - meanV[a];
-        center[a] += dx/count; meanV[a] += dv/count;
-        width += dx * (mm-center[a]); thermal += dv * (v[a]-meanV[a]);
-      }
+      if (live) scattering(p, v, first, s);
+      writeAtom(result,k,p,0,v,0,live,live && inside(p,v),s.blueRate,s.greenRate,m);
     }
-    metrics.push({count, centroidMM: count ? center : null, rmsRadiusMM: count ? Math.sqrt(Math.max(0,width)/count) : null,
-      temperatureUK: count > 1 ? C.mass * Math.max(0,thermal) * 1e6 / (3*C.kB*(count-1)) : null });
+    finishFrame(run,f,m);
   }
   function propagate(t, end, windowStart) {
     // 物理单位在积分核内为 SI。在阶段边界结束当前步，避免突跳被时间平均。
@@ -191,12 +251,11 @@ export function simulateSequence(input, config, options = {}) {
     if (point.checkpoint) {
       for (const atom of atoms) {
         atom.live = atom.live && atom.held;
-        if (atom.live) counts[point.checkpoint]++;
         atom.held = true;
       }
     }
     frame(f);
+    options.onProgress?.(f/(grid.length-1));
   }
-  return { n, frameCount: grid.length, timesMS, positionsM, alive, trapped, blueRates, greenRates, metrics,
-    stages: program.stages, ...counts, summary: counts, loadWindowMS: loadEnd, elapsedMS: performance.now()-start };
+  return finishSequenceRun(run,start);
 }

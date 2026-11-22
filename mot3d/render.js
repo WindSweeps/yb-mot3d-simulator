@@ -553,6 +553,7 @@ export function mountScene(container) {
     }
     // 游标经过装载等待段时，每个通道及原子云都保持静止，保留上次绘图。
     if (previous && !sequenceGeometryChanged && previous.gradientGCM === next.gradientGCM &&
+      (previous.incidentFlux === 0) === (next.incidentFlux === 0) &&
       previous.greenWaistMM === next.greenWaistMM && previous.positionsM?.buffer === next.positionsM?.buffer &&
       previous.positionsM?.byteOffset === next.positionsM?.byteOffset &&
       Boolean(previous.previousPositionsM) === Boolean(next.previousPositionsM) &&

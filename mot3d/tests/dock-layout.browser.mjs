@@ -27,7 +27,7 @@ const host = find('#sequence-dock');
 const tab = id => host.locator('.dv-tab').filter({ hasText:labels[id] });
 const clock = find('.seq-time-input input');
 const key = variant => keyPrefix+variant;
-let workers = 0;
+let workers = 0, retained;
 const errors = [];
 page.on('pageerror', err=>errors.push(err.message));
 page.on('worker', worker=>{ if (new URL(worker.url()).pathname.endsWith('/sequence-worker.js')) workers++; });
@@ -108,7 +108,7 @@ async function verifyInstances() {
         return gl===window.dockTestGL && !gl.isContextLost() && c.width>0 && c.height>0;
       }));
     }
-    if(id==='readings') assert.equal(await find(selector).innerText(),'46');
+    if(id==='readings') assert.equal(Number(await find(selector).innerText()),retained);
     if(id==='imaging') {
       assert.equal(await find('#seq-imaging-mode').inputValue(),'absorption');
       assert.equal(await find('#seq-image-stage').inputValue(),'atoms');
@@ -138,6 +138,8 @@ try {
   assert.ok(groupOf(standard,'imaging').y>groupOf(standard,'scene').y);
   assert.deepEqual(groupOf(standard,'imaging').tabs,['imaging','readings']);
   assert.equal(groupOf(standard,'imaging').active,'imaging');
+  retained = Number(await find('#seq-n2').textContent());
+  assert.ok(retained > 0);
   await recordInstances();
   const firstCount=workers;
   assert.equal(firstCount,1);
@@ -205,5 +207,5 @@ try {
   await deep.close();
   assert.deepEqual(errors,[]);
   console.log(JSON.stringify({url,standard,afterDrop:fingerprint(stacked),split:fingerprint(split),resizedPixels:delta,
-    restoredWidths:restored.map(g=>g.w),compact:compact[0].tabs,workerCountBeforeReload:firstCount,retained:46}));
+    restoredWidths:restored.map(g=>g.w),compact:compact[0].tabs,workerCountBeforeReload:firstCount,retained}));
 } finally {await browser.close();}
