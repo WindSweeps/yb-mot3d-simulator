@@ -45,7 +45,9 @@ export function mountSequenceEditor(host, { onChange, onTime, onInvalid } = {}) 
       <label><input type="checkbox" data-gate="blueEnabled">399 nm 光路</label>
       <label><input type="checkbox" data-gate="greenEnabled">556 nm 光路</label></div>
       <label class="seq-scale">横轴<select aria-label="时间轴比例"><option value="phase">各阶段展开</option><option value="time">实际时间比例</option></select></label></div>
-    <div class="seq-chart"><div class="seq-ruler-row"><span class="seq-label">实验时间</span><div class="seq-ruler"></div><span class="seq-readout-head">游标读数</span></div>
+    <div class="seq-chart"><div class="seq-ruler-row"><span class="seq-label">实验时间</span>
+      <div class="seq-ruler"><div class="seq-ticks"></div><span class="seq-playhead" aria-hidden="true"></span></div>
+      <span class="seq-readout-head">游标读数</span></div>
       <div class="seq-lanes"></div>
       <div class="seq-lane seq-camera" hidden><a href="#sequence-imaging" class="seq-label">相机曝光</a><div class="seq-plot"><span class="seq-exposure-window"></span></div><output class="seq-value"></output></div></div>
     <div class="seq-transport"><button type="button" class="button" data-action="play" aria-pressed="false">播放时序</button>
@@ -58,6 +60,7 @@ export function mountSequenceEditor(host, { onChange, onTime, onInvalid } = {}) 
     <a href="https://m-labs.hk/artiq/manual/rtio.html#timeline-and-output-events" target="_blank" rel="noopener">ARTIQ 时间游标 ↗</a></div>`;
   const get = selector => host.querySelector(selector);
   const ruler = get('.seq-ruler'), slider = get('.seq-slider'), cursorInput = get('.seq-time-input input');
+  const rulerTicks = get('.seq-ticks');
   const play = get('[data-action=play]'), form = get('.seq-fields'), error = get('.seq-error');
   const title = get('.seq-form-head h3'), span = get('.seq-stage-span'), note = get('.seq-note');
   const cameraLane = get('.seq-camera'), cameraWindow = get('.seq-exposure-window');
@@ -170,12 +173,12 @@ export function mountSequenceEditor(host, { onChange, onTime, onInvalid } = {}) 
       }
     }
     const markers = [0, ...program.stages.map(s => s.endMS)];
-    ruler.replaceChildren();
+    rulerTicks.replaceChildren();
     const ticks = scale === 'phase' ? markers : [0, program.durationMS / 2, program.durationMS];
     for (const t of ticks) {
       const tickLabel = element('span', 'seq-tick', fmt(t));
       tickLabel.style.left = (100 * timeScale(t)) + '%';
-      ruler.append(tickLabel);
+      rulerTicks.append(tickLabel);
     }
     for (const [i, { path, dividers }] of reader.entries()) {
       const channel = channels[i], values = samples.map(([, s]) => channel.value(s));
@@ -270,11 +273,19 @@ export function mountSequenceEditor(host, { onChange, onTime, onInvalid } = {}) 
     row.append(element('span', 'seq-label', c.label), plot, output); get('.seq-lanes').append(row);
     reader[i] = { output, path, dividers };
   }
+  function seekAtPointer(event) {
+    const rect = rulerTicks.getBoundingClientRect();
+    setTime(physicalTime((event.clientX - rect.left) / rect.width));
+  }
   listen(get('.seq-chart'), 'pointerdown', event => {
-    const plot = event.target.closest('.seq-plot');
-    if (!plot || !enabled || !valid || event.button !== 0) return;
-    const rect = plot.getBoundingClientRect();
-    pause(); setTime(physicalTime((event.clientX - rect.left) / rect.width));
+    if (!enabled || !valid || !event.isPrimary || event.button !== 0) return;
+    if (ruler.contains(event.target)) ruler.setPointerCapture(event.pointerId);
+    else if (!event.target.closest('.seq-plot')) return;
+    pause();
+    seekAtPointer(event);
+  });
+  listen(ruler, 'pointermove', event => {
+    if (enabled && valid && ruler.hasPointerCapture(event.pointerId)) seekAtPointer(event);
   });
   program.stages.forEach((s, i) => {
     const button = element('button', 'seq-phase');
