@@ -49,6 +49,11 @@ function normalize(input = {}) {
   return p;
 }
 
+export function magneticCenterMM(gradientGPerCm, tensor, biasG) {
+  if (gradientGPerCm === 0) return null;
+  return biasG.map((field, axis) => -10 * field / (gradientGPerCm * tensor[axis]));
+}
+
 export function derive(input = {}) {
   const p = normalize(input), gradientGPerCm = p.mainCurrentA * p.gradientPerAmp;
   const gradientTeslaPerM = gradientGPerCm * .01;
@@ -56,8 +61,7 @@ export function derive(input = {}) {
   const biasG = p.biasCurrentA.map((v, i) => v * p.biasPerAmp[i]);
   const biasTesla = biasG.map(v => v * 1e-4);
   const zeroUnique = gradientTeslaPerM !== 0;
-  const zeroMM = zeroUnique ? biasTesla.map((v, i) => -1000 * v / (gradientTeslaPerM * mainTensor[i]))
-    : biasTesla.every(v => v === 0) ? [0, 0, 0] : null;
+  const zeroMM = magneticCenterMM(gradientGPerCm, mainTensor, biasG) ?? (biasTesla.every(v => v === 0) ? [0, 0, 0] : null);
   const peakS = p.powersMW.map(v => 2 * v * 1e-3 / (Math.PI * (p.waistMM * 1e-3) ** 2 * ISAT));
   return { gradientGPerCm, gradientTeslaPerM, biasG, biasTesla, zeroMM, zeroUnique,
     mainAxis: p.mainAxis, mainAxisUnit: p.mainAxis === 'y' ? [0, 1, 0] : [0, 0, 1], mainTensor,

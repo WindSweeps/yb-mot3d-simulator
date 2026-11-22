@@ -2,7 +2,7 @@
 // has no field/trajectory interface, so this renderer shares the dependency only.
 import * as THREE from '../anatomy-demo/vendor/three-r160.module.js';
 import { OrbitControls } from '../anatomy-demo/vendor/OrbitControls-r160.js';
-import { compile, fieldAt, opticalAcceleration, BEAM_DIRECTIONS } from './physics.js';
+import { compile, fieldAt, magneticCenterMM, opticalAcceleration, BEAM_DIRECTIONS } from './physics.js';
 import { DEFAULT_FLUX } from './fluorescence.js';
 import { createFluorescenceVolume, recentWindow, screenFade } from './fluorescence-volume.js';
 import { createSequenceRender } from './sequence-render.js';
@@ -281,8 +281,7 @@ export function mountScene(container) {
   function updateSequenceCenter() {
     const gradient = sequenceFrame.gradientGCM;
     const center = groups.zero.position;
-    if (gradient === 0) center.set(0, 0, 0);
-    else center.set(...derived.biasG.map((b, i) => -10 * b / (gradient * derived.mainTensor[i])));
+    center.fromArray(magneticCenterMM(gradient, derived.mainTensor, derived.biasG) ?? [0, 0, 0]);
     const locked = activeView === 'cloud';
     groups.zero.visible = gradient !== 0 && (locked || Math.max(Math.abs(center.x), Math.abs(center.y), Math.abs(center.z)) <= 48);
     groups.sequenceScale.position.copy(center);

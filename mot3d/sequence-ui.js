@@ -36,6 +36,7 @@ export function mountSequenceEditor(host, { onChange, onTime, onInvalid } = {}) 
   let program = compileSequence(songSequence());
   let timeMS = 0, activePhase = 0, scale = 'phase', playback = 0, lastTick = 0;
   let enabled = true, valid = true;
+  let exposureUS = 0;
   host.classList.add('seq-editor');
   host.innerHTML = `
     <div class="seq-title"><div><h2>时序通道</h2><p>各通道共用实验时间，光功率为六束单向光之和。</p></div>
@@ -45,7 +46,8 @@ export function mountSequenceEditor(host, { onChange, onTime, onInvalid } = {}) 
       <label><input type="checkbox" data-gate="greenEnabled">556 nm 光路</label></div>
       <label class="seq-scale">横轴<select aria-label="时间轴比例"><option value="phase">各阶段展开</option><option value="time">实际时间比例</option></select></label></div>
     <div class="seq-chart"><div class="seq-ruler-row"><span class="seq-label">实验时间</span><div class="seq-ruler"></div><span class="seq-readout-head">游标读数</span></div>
-      <div class="seq-lanes"></div></div>
+      <div class="seq-lanes"></div>
+      <div class="seq-lane seq-camera" hidden><a href="#sequence-imaging" class="seq-label">相机曝光</a><div class="seq-plot"><span class="seq-exposure-window"></span></div><output class="seq-value"></output></div></div>
     <div class="seq-transport"><button type="button" class="button" data-action="play" aria-pressed="false">播放时序</button>
       <label class="seq-slider-label"><span class="sr-only">实验时序游标</span><input class="seq-slider" type="range" min="0" max="10000" step="1" value="0"></label>
       <label class="seq-time-input"><span class="sr-only">游标时间</span><input type="number" aria-label="游标时间，单位 ms" min="0" step="any" required value="0"><span>ms</span></label></div>
@@ -58,6 +60,7 @@ export function mountSequenceEditor(host, { onChange, onTime, onInvalid } = {}) 
   const ruler = get('.seq-ruler'), slider = get('.seq-slider'), cursorInput = get('.seq-time-input input');
   const play = get('[data-action=play]'), form = get('.seq-fields'), error = get('.seq-error');
   const title = get('.seq-form-head h3'), span = get('.seq-stage-span'), note = get('.seq-note');
+  const cameraLane = get('.seq-camera'), cameraWindow = get('.seq-exposure-window');
   const reader = [];
   const phaseButtons = [];
   const events = new AbortController();
@@ -109,8 +112,22 @@ export function mountSequenceEditor(host, { onChange, onTime, onInvalid } = {}) 
       const value = c.value(state);
       reader[i].output.textContent = c.gate ? (value ? '开启' : '关闭') : fmt(value) + ' ' + c.unit;
     });
+    positionExposure();
     if (!playback) play.textContent = timeMS >= program.durationMS ? '重播时序' : '播放时序';
     if (announce) onTime?.(timeMS);
+  }
+  function positionExposure() {
+    if (!exposureUS) return;
+    const left = timeScale(Math.max(0, timeMS - exposureUS / 1000));
+    cameraWindow.style.left = (left * 100) + '%';
+    cameraWindow.style.width = ((timeScale(timeMS) - left) * 100) + '%';
+  }
+  function setImagingGate(settings) {
+    exposureUS = settings.mode === 'off' ? 0 : settings.exposureUS;
+    cameraLane.hidden = !exposureUS;
+    get('.seq-camera .seq-label').textContent = settings.mode === 'absorption' ? '吸收曝光' : '荧光曝光';
+    get('.seq-camera .seq-value').textContent = fmt(exposureUS) + ' µs';
+    positionExposure();
   }
   function pause() {
     cancelAnimationFrame(playback);
@@ -252,12 +269,13 @@ export function mountSequenceEditor(host, { onChange, onTime, onInvalid } = {}) 
     const output = element('output', 'seq-value');
     row.append(element('span', 'seq-label', c.label), plot, output); get('.seq-lanes').append(row);
     reader[i] = { output, path, dividers };
-    listen(plot, 'pointerdown', event => {
-      if (!enabled || !valid || event.button !== 0) return;
-      const rect = plot.getBoundingClientRect();
-      pause(); setTime(physicalTime((event.clientX - rect.left) / rect.width));
-    });
   }
+  listen(get('.seq-chart'), 'pointerdown', event => {
+    const plot = event.target.closest('.seq-plot');
+    if (!plot || !enabled || !valid || event.button !== 0) return;
+    const rect = plot.getBoundingClientRect();
+    pause(); setTime(physicalTime((event.clientX - rect.left) / rect.width));
+  });
   program.stages.forEach((s, i) => {
     const button = element('button', 'seq-phase');
     button.type = 'button'; button.dataset.stage = s.id;
@@ -290,7 +308,7 @@ export function mountSequenceEditor(host, { onChange, onTime, onInvalid } = {}) 
   listen(document, 'visibilitychange', () => { if (document.hidden) pause(); });
   makeFields(); refreshLabels(); drawTraces(); setTime(0, false);
   return {
-    setTime, pause,
+    setTime, pause, setImagingGate,
     setEnabled(value) { enabled = Boolean(value); if (!enabled) pause(); applyAvailability(); },
     replace(config) { applyConfig(config, true); },
     getConfig() { return { ...program.config }; },

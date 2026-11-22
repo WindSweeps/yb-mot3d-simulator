@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="./styles.css">
   <link rel="stylesheet" href="./sequence.css">
   <link rel="stylesheet" href="./sequence-workspace.css">
+  <link rel="stylesheet" href="./sequence-imaging.css">
 </head>
 <body class="sequence-page">
   <a class="skip-link" href="#sequence-editor">跳到通道时序</a>
@@ -29,6 +30,7 @@
         <div class="sequence-scene-status"><span id="sequence-compute-status" role="status">正在准备求解器</span><button type="button" class="text-button" id="sequence-retry" hidden>重新计算</button></div>
         <p id="sequence-scene-error" role="alert" hidden></p>
       </div>
+      <section id="sequence-imaging" aria-label="模拟相机成像"></section>
       <section class="sequence-readings" aria-label="样本与转移效率">
         <h2>原子样本</h2>
         <div class="sequence-stat-grid">
@@ -70,6 +72,7 @@
       <p>宋博组在双色装载时将 556 nm 设为蓝失谐。交接开始时，绿光跳至红失谐，399 nm 在 1 ms 内关闭。压缩时改变绿光失谐、降低功率并提高梯度。网页把论文的两对强光分配给 V1、V2，一对弱光分配给沿 Y 轴的 H。<a href="https://arxiv.org/pdf/2503.24383v2#page=3" target="_blank" rel="noopener">Li 等，第 V 节 ↗</a></p>
       <p>默认纯绿接收驻留 10 ms，弱光每束按强弱功率比例降至 14.9 µW。接收时长、磁场的线性响应和功率曲线都属于模型设定。两色共用基态，光力随各束高斯光强、多普勒频移、Zeeman 频移与偏振变化。积分包括重力与可选的随机光子反冲。</p>
       <p>装载阶段用最初 20 ms 的轨迹估计捕获概率，并用速率方程计算整个装载时段的原子数。交接和压缩逐步积分同一批留存原子。温度由扣除云团平均速度后的三维速度方差计算，RMS 半径由相对云心的三维位移计算。</p>
+      <p>成像视场以曝光结束时的磁场中心为原点。荧光使用阱内样本在曝光窗内的散射率，合并两种波长时采用相同的探测效率。弱探针吸收按柱密度计算透射光，再经过成像系统模糊并扣除暗场，得到光学厚度。图像给出相机的期望信号，未加入随机读出噪声、多重散射或探针反冲。<a href="https://arxiv.org/pdf/1509.03233#page=9" target="_blank" rel="noopener">Yamamoto 等，Yb 荧光探测效率 ↗</a> · <a href="https://arxiv.org/pdf/0707.2930#page=2" target="_blank" rel="noopener">Reinaudi 等，三帧吸收成像 ↗</a></p>
     </details>
     <p id="sequence-file-status" role="status"></p>
   </main>

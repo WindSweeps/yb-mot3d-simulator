@@ -23,6 +23,10 @@
 .seq-blue { --seq-color:#99c2ff; }
 .seq-green { --seq-color:var(--lime); }
 .seq-lane.seq-field { --seq-color:var(--amber); }
+.seq-camera { --seq-color:var(--cyan); }
+.seq-camera[hidden] { display:none; }
+.seq-camera a { text-decoration:underline; text-underline-offset:2px; }
+.seq-exposure-window { position:absolute; top:6px; bottom:6px; min-width:1px; background:var(--cyan); opacity:.75; }
 .seq-ruler-row,.seq-lane { column-gap:8px; }
 .seq-plot { height:28px; position:relative; cursor:crosshair; border-inline:1px solid var(--line-soft); }
 .seq-plot svg { width:100%; height:100%; overflow:visible; }

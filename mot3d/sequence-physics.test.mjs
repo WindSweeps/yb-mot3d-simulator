@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { CONSTANTS as C, radiation } from './physics.js';
 import { compileSequence, sequenceAt, songSequence } from './sequence.js';
 import { sequenceRadiation, simulateSequence } from './sequence-physics.js';
+import { fluorescenceExposure } from './sequence-exposure.js';
 
 function close(x, y, tolerance) {
   assert.ok(Math.abs(x-y) <= tolerance, `${x} ≠ ${y} (±${tolerance})`);
@@ -76,7 +77,22 @@ assert.deepEqual(batch.positionsM,replay.positionsM);
 assert.ok(batch.greenRates.some(r=>r>0));
 for (let f=0; f<batch.frameCount; f++) {
   if (f) assert.ok(batch.timesMS[f]>batch.timesMS[f-1]);
+  assert.equal(batch.trapped.subarray(f*batch.n,(f+1)*batch.n).reduce((sum,n)=>sum+n,0),batch.metrics[f].count);
   if (batch.timesMS[f]>=song.loadMS+song.handoffMS)
     assert.ok(batch.blueRates.subarray(f*batch.n,(f+1)*batch.n).every(r=>r===0));
 }
+// 用真实轨迹验证曝光跨过 399 nm 关断沿，以及曝光全部位于纯绿阶段的两种读数。
+const gateEnd = song.loadMS + song.handoffMS;
+const lastBlue = batch.timesMS.indexOf(gateEnd) - 1;
+const blueSlice = batch.blueRates.subarray(lastBlue * batch.n, (lastBlue + 1) * batch.n);
+const mask = batch.trapped.subarray(lastBlue * batch.n, (lastBlue + 1) * batch.n);
+const expectedRate = blueSlice.reduce((sum,r,i) => sum + r * mask[i], 0);
+assert.ok(expectedRate > 0);
+function exposedBlue(end, durationUS) {
+  const image = fluorescenceExposure(batch, end, durationUS, origin, () => 1);
+  return image.blueRates.reduce((sum,r,i) => sum + r * image.alive[i] * (image.weights?.[i] ?? image.weight), 0) * durationUS * 1e-6;
+}
+close(exposedBlue(gateEnd + .01, 20), expectedRate * .00001, 1e-6);
+assert.equal(exposedBlue(gateEnd + .021, 20),0);
+assert.equal(exposedBlue(0,20),0);
 console.log('通过单色散射、双色基态归一、绿光饱和与束腰、解析重力、队列交接、布居温度、暗场、空云、步长细化与种子复现检查。',batch.summary);

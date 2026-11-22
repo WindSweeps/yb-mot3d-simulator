@@ -131,7 +131,7 @@ export function simulateSequence(input, config, options = {}) {
   if (initial.length !== n*6 || initial.some(x => !Number.isFinite(x))) throw new RangeError('时序初始相空间尺寸或数值无效。');
   const atoms = Array.from({ length: n }, (_, i) => atomFrom(initial, i, seed));
   const samples = n * grid.length, timesMS = Float64Array.from(grid, point => point.time);
-  const positionsM = new Float32Array(samples * 3), alive = new Uint8Array(samples);
+  const positionsM = new Float32Array(samples * 3), alive = new Uint8Array(samples), trapped = new Uint8Array(samples);
   const blueRates = new Float32Array(samples), greenRates = new Float32Array(samples);
   const metrics = [], counts = { N0: 0, N1: 0, N2: 0 };
   const first = lightField(model), middle = lightField(model), s = scratch();
@@ -149,6 +149,7 @@ export function simulateSequence(input, config, options = {}) {
       scattering(p, v, first, s);
       blueRates[k] = s.blueRate; greenRates[k] = s.greenRate;
       if (!inside(p,v)) continue;
+      trapped[k] = 1;
       count++;
       for (let a = 0; a < 3; a++) {
         const mm = 1000 * p[a], dx = mm - center[a], dv = v[a] - meanV[a];
@@ -196,6 +197,6 @@ export function simulateSequence(input, config, options = {}) {
     }
     frame(f);
   }
-  return { n, frameCount: grid.length, timesMS, positionsM, alive, blueRates, greenRates, metrics,
+  return { n, frameCount: grid.length, timesMS, positionsM, alive, trapped, blueRates, greenRates, metrics,
     stages: program.stages, ...counts, summary: counts, loadWindowMS: loadEnd, elapsedMS: performance.now()-start };
 }
