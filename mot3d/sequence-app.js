@@ -19,6 +19,12 @@ const formatId = 'yb-mot-sequence-v1';
 const blank = '—';
 const maxFileBytes = 256000;
 const atomFormat = new Intl.NumberFormat('zh-CN', {notation:'compact', maximumSignificantDigits:3});
+function scientificCount(value) {
+  if (value === 0) return '0';
+  const [mantissa, exponent] = value.toExponential(2).split('e');
+  const power = Array.from(String(Number(exponent)), digit => digit === '-' ? '⁻' : '⁰¹²³⁴⁵⁶⁷⁸⁹'[Number(digit)]).join('');
+  return mantissa + ' × 10' + power;
+}
 const computeShader = $('#sequence-compute').textContent;
 let params = await initialInputs(), program = compileSequence(songSequence()), timeMS = 0;
 let geometry = derive(params);
@@ -112,7 +118,7 @@ function showFrame(t) {
   $('#seq-radius').textContent = numberOrBlank(metric?.rmsRadiusMM, 3);
   const count = population && population.at(timeMS, metric.count);
   showAtoms($('#seq-population'), count);
-  $('#seq-scene-population').textContent = Number.isFinite(count) ? '估计阱内 ' + atomFormat.format(count) + ' 个原子' : '';
+  $('#seq-scene-population').textContent = Number.isFinite(count) ? '估计阱内 ' + scientificCount(count) + ' 个原子' : '';
   const windowMS = Math.min(20, program.stages[0].durationMS);
   const onPlateau = channels.stageId === 'load' && timeMS > windowMS;
   $('#seq-window-note').textContent = onPlateau
