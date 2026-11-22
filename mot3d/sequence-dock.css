@@ -53,6 +53,10 @@
 #sequence-dock .dv-tabs-and-actions-container { border-bottom: 1px solid var(--line); }
 #sequence-dock .dv-tab { cursor: grab; outline-offset: -2px; }
 #sequence-dock .dv-tab:focus-visible { outline: 2px solid var(--cyan); }
+/* Dockview 的 4 px 手柄需要覆盖面板之间完整的 7 px 空隙。 */
+#sequence-dock .dv-sash::before { content: ''; position: absolute; }
+#sequence-dock .dv-horizontal > .dv-sash-container > .dv-sash::before { inset: 0 -2px; }
+#sequence-dock .dv-vertical > .dv-sash-container > .dv-sash::before { inset: -2px 0; }
 #sequence-dock .dv-sash:focus-visible {
   background-color: var(--cyan);
   outline: 2px solid var(--text);

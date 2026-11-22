@@ -208,6 +208,14 @@ export function mountSequenceDock() {
   dock.onDidLayoutChange(changed);
   dock.onDidActivePanelChange(changed);
   dock.onDidMovePanel(() => queueMicrotask(save));
+  host.addEventListener('pointerdown', event => {
+    if (!event.isPrimary || event.button !== 0) return;
+    const sash = event.target.closest('.dv-sash');
+    if (!sash) return;
+    // 保留 Dockview 的指针拖动，只取消浏览器的原生文字选择。
+    event.preventDefault();
+    if (sash.tabIndex >= 0) sash.focus({preventScroll: true});
+  }, {capture: true});
   host.addEventListener('pointerup', () => queueMicrotask(save));
   compactScreen.addEventListener('change', () => {
     clearTimeout(saveTimer);

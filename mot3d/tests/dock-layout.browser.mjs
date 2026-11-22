@@ -61,14 +61,41 @@ async function drop(from, onto, side) {
   await page.mouse.up();
   await settled();
 }
-async function resizeColumn() {
-  const sash=host.locator('.dv-split-view-container.dv-horizontal > .dv-sash-container > .dv-sash.dv-enabled').first();
+const selectedText = () => page.evaluate(() => document.getSelection().toString());
+async function resizeSeparator(orientation, dx, dy) {
+  const sash=host.getByRole('separator').and(host.locator('.dv-sash.dv-enabled[aria-orientation="'+orientation+'"]')).first();
   await sash.scrollIntoViewIfNeeded();
   const r=await sash.boundingBox();
-  assert.ok(r && r.height>r.width);
-  const x=r.x+r.width*.5,y=r.y+r.height*.4;
-  await page.mouse.move(x,y); await page.mouse.down(); await page.mouse.move(x+70,y,{steps:12}); await page.mouse.up();
+  assert.ok(r);
+  // 从可见分隔空隙的边缘开始，确认拖动不会进入浏览器的文字选择。
+  const x=r.x+r.width*.5-(orientation==='vertical' ? 3 : 0);
+  const y=r.y+r.height*.5-(orientation==='horizontal' ? 3 : 0);
+  await page.evaluate(() => document.getSelection().removeAllRanges());
+  await page.mouse.move(x,y);
+  await page.mouse.down();
+  await page.mouse.move(x+dx,y+dy,{steps:12});
+  const duringDrag=await selectedText();
+  await page.mouse.up();
+  assert.equal(duringDrag,'',orientation+' separator must not select text while dragging');
+  assert.equal(await selectedText(),'',orientation+' separator must not leave selected text');
   await settled();
+}
+async function checkTextSelection() {
+  const text=find('.seq-title p');
+  await text.scrollIntoViewIfNeeded();
+  const {x,y,width}=await text.evaluate(node=>{
+    const range=document.createRange();
+    range.setStart(node.firstChild,0);
+    range.setEnd(node.firstChild,7);
+    const rect=range.getBoundingClientRect();
+    return {x:rect.x,y:rect.y+rect.height/2,width:rect.width};
+  });
+  await page.mouse.move(x+1,y);
+  await page.mouse.down();
+  await page.mouse.move(x+width-1,y,{steps:6});
+  await page.mouse.up();
+  assert.match(await selectedText(),/各通道/,'panel text remains selectable after resizing');
+  await page.evaluate(() => document.getSelection().removeAllRanges());
 }
 async function place(panel,placement,target) {
   const menu=find('#sequence-layout-menu');
@@ -138,6 +165,9 @@ try {
   assert.ok(groupOf(standard,'imaging').y>groupOf(standard,'scene').y);
   assert.deepEqual(groupOf(standard,'imaging').tabs,['imaging','readings']);
   assert.equal(groupOf(standard,'imaging').active,'imaging');
+  await resizeSeparator('horizontal',-210,-90);
+  assert.ok(groupOf(await layout(),'scene').h<groupOf(standard,'scene').h-20,'separator changes row heights');
+  await checkTextSelection();
   retained = Number(await find('#seq-n2').textContent());
   assert.ok(retained > 0);
   await recordInstances();
@@ -151,7 +181,7 @@ try {
   const split=await assertFour();
   assert.equal(split.length,4,'edge drop splits the target '+JSON.stringify(split));
   assert.ok(groupOf(split,'imaging').x<groupOf(split,'timeline').x);
-  await resizeColumn();
+  await resizeSeparator('vertical',70,-150);
   const resized=await layout();
   const delta=Math.max(...resized.map(g=>Math.abs(g.w-groupOf(split,g.tabs[0]).w)));
   assert.ok(delta>20,'splitter changes column widths '+JSON.stringify({split,resized}));
