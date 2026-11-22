@@ -6,8 +6,11 @@ import { DEFAULT_FLUX } from './fluorescence.js';
 import { loadPopulation } from './sequence-population.js';
 import { fluorescenceExposure, sequenceFrameAt } from './sequence-exposure.js';
 import { mountImagingPanel, validateImagingSettings } from './sequence-imaging-view.js';
+import { mountSequenceDock } from './sequence-dock.js';
 
-const $ = selector => document.querySelector(selector);
+// 时序与求解器持续更新同一组控件，停靠过程可以移动它们的父节点。
+const elements = new Map(Array.from(document.querySelectorAll('[id]'), el => ['#' + el.id, el]));
+const $ = selector => elements.get(selector);
 const form = $('#sequence-inputs');
 const fields = Array.from(form.elements);
 const loadingForm = $('#seq-loading-inputs');
@@ -237,7 +240,9 @@ $('#sequence-file').addEventListener('change', async event => {
     const data = JSON.parse(await file.text());
     if (data.format !== formatId || !data.params) throw new Error('请选择本工作台导出的时序 JSON。');
     const compiled = compileSequence(data.config);
-    const imported = compile({ ...data.params, _mot3dCompiled:false }).params;
+    const inputParams = { ...data.params };
+    delete inputParams._mot3dCompiled;
+    const imported = compile(inputParams).params;
     for (const field of fields) {
       const v = imported[field.name];
       if (!Number.isFinite(v) || (field.min && v < Number(field.min)) || (field.max && v > Number(field.max)) ||
@@ -284,6 +289,7 @@ window.addEventListener('pagehide', e => {
   if (e.persisted) return;
   clearTimeout(timer); worker?.terminate(); imaging.destroy(); editor.destroy(); scene?.destroy();
 });
+mountSequenceDock();
 fillInputs();
 initializeScene();
 recalculate();

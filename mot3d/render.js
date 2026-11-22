@@ -41,7 +41,7 @@ export function mountScene(container) {
   let sequenceFrame = null, sequenceRender = null, mainCoilLabel = null;
   let sequenceGeometryChanged = true;
   let forceVelocity = [0, 0, 0], layers = { beams: true, coils: true, trails: true, fluorescence: false };
-  let disposed = false;
+  let disposed = false, viewportVisible = false;
   const disposables = new Set();
   function clear(group) {
     group.traverse(o => {
@@ -465,7 +465,7 @@ export function mountScene(container) {
   function scheduleFade() {
     clearTimeout(fadeTimer);
     cancelAnimationFrame(fadeAnimation);
-    if (!motionFade || disposed) return;
+    if (!motionFade || disposed || !viewportVisible) return;
     const visible = (groups.fluorescence.visible && flybyLight.geometry.drawRange.count) ||
       (groups.trails.visible && trailLines?.geometry.drawRange.count) || (groups.atoms.visible && points?.geometry.drawRange.count) ||
       (groups.density.visible && freeDensity?.geometry.drawRange.count) ||
@@ -475,7 +475,7 @@ export function mountScene(container) {
     fadeTimer = setTimeout(() => { fadeAnimation = requestAnimationFrame(fadeTick); }, 40);
   }
   function fadeTick(now) {
-    if (disposed) return;
+    if (disposed || !viewportVisible) return;
     applyFade(screenFade(now - motionSince));
     draw();
     if (motionFade > 0) fadeAnimation = requestAnimationFrame(fadeTick);
@@ -583,9 +583,10 @@ export function mountScene(container) {
     u.viewportHeight.value = Math.max(1, container.clientHeight) * renderer.getPixelRatio();
   }
   function draw() {
-    if (disposed) return;
-    camera.updateMatrixWorld();
+    if (disposed || !viewportVisible) return;
     const width = container.clientWidth, height = container.clientHeight;
+    if (!width || !height) return;
+    camera.updateMatrixWorld();
     for (const l of labels) {
       const p = l.p.clone().add(l.group.position).project(camera);
       const compactAxisLabel = width < 500 && l.group === groups.fixed && l.el.textContent.includes('·');
@@ -618,12 +619,22 @@ export function mountScene(container) {
     controls.update(); draw();
   }
   function resize() {
-    const w = Math.max(1, container.clientWidth), h = Math.max(1, container.clientHeight);
+    const w = container.clientWidth, h = container.clientHeight, wasVisible = viewportVisible;
+    viewportVisible = w > 0 && h > 0;
+    if (!viewportVisible) {
+      clearTimeout(fadeTimer); cancelAnimationFrame(fadeAnimation);
+      return;
+    }
     renderer.setSize(w, h, false); camera.aspect = w / h;
     for (const obj of [cloudLight, flybyLight]) obj.material.uniforms.viewportHeight.value = h * renderer.getPixelRatio();
     updateSequenceViewport();
     camera.fov = 2 * Math.atan(Math.tan(18 * Math.PI / 180) * Math.max(1, 1.45 / camera.aspect)) * 180 / Math.PI;
-    camera.updateProjectionMatrix(); draw();
+    camera.updateProjectionMatrix();
+    if (!wasVisible && motionFade) {
+      applyFade(screenFade(performance.now() - motionSince));
+      scheduleFade();
+    }
+    draw();
   }
   const observer = new ResizeObserver(resize); observer.observe(container);
   controls.addEventListener('change', draw); setView('iso'); resize();

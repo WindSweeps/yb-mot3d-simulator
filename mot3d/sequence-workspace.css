@@ -40,6 +40,9 @@
 #sequence-scene-error,#sequence-file-status { font-size:var(--meta); color:var(--amber); margin:0; }
 #sequence-scene-error { padding:6px 18px; }
 #sequence-file-status:empty { display:none; }
+#sequence-file-entry { grid-column:1 / -1; margin:8px 0; color:var(--muted); }
+#sequence-file-entry a { display:inline-block; }
+.sequence-page:has(#sequence-file-entry:not([hidden])) :is(.header-actions,.sequence-workspace > :not(#sequence-file-entry)) { display:none; }
 @media(max-width:960px) {
   .sequence-workspace { grid-template-columns:minmax(0,1fr); }
   .sequence-page main { padding:18px 14px; }

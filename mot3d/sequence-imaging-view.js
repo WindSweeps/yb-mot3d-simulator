@@ -60,7 +60,7 @@ export function mountImagingPanel(host, { onSettingsChange, onValidityChange, on
   const initial = validateImagingSettings();
   let settings = initial, live = null, frozen = null, sequenceTimer = 0, replayIndex = 0;
   let timer = 0, animation = 0, lastPaint = -Infinity, version = 0, calculated = -1;
-  let image = null, raster = null, valid = true, destroyed = false;
+  let image = null, raster = null, valid = true, destroyed = false, visible = false;
   const events = new AbortController();
   const listen = (el,type,fn) => el.addEventListener(type,fn,{signal:events.signal});
   const el = selector => host.querySelector(selector);
@@ -151,7 +151,7 @@ export function mountImagingPanel(host, { onSettingsChange, onValidityChange, on
     timer = 0; animation = 0;
   }
   function schedule(immediate = false) {
-    if (destroyed) return;
+    if (destroyed || !visible) return;
     if (immediate || settings.mode === 'off') cancelDraw();
     if (settings.mode === 'off' || timer || animation) return;
     const queue = () => { timer = 0; animation = requestAnimationFrame(draw); };
@@ -173,7 +173,9 @@ export function mountImagingPanel(host, { onSettingsChange, onValidityChange, on
     ctx.putImageData(raster,0,0);
   }
   function draw() {
-    animation = 0; lastPaint = performance.now();
+    animation = 0;
+    if (!visible || !host.clientWidth || !host.clientHeight) return;
+    lastPaint = performance.now();
     const source = frozen ?? live, {mode} = settings;
     const stage = frozen ? stages[mode][replayIndex][0] : settings[stageKey(mode)];
     stageInput.value = stage;
@@ -275,7 +277,15 @@ export function mountImagingPanel(host, { onSettingsChange, onValidityChange, on
       }
     },1100);
   });
-  syncControls(); stopReplay(); schedule(true);
+  const observer = new ResizeObserver(() => {
+    const shown = host.clientWidth > 0 && host.clientHeight > 0;
+    if (shown === visible) return;
+    visible = shown;
+    if (shown) schedule(true);
+    else cancelDraw();
+  });
+  observer.observe(host);
+  syncControls(); stopReplay();
   return {
     setFrame(frame) {
       live = frame;
@@ -284,6 +294,6 @@ export function mountImagingPanel(host, { onSettingsChange, onValidityChange, on
       if (!frozen) { version++; schedule(); }
     },
     getSettings:() => ({...settings}), isValid:() => valid, setSettings,
-    destroy() { destroyed = true; stopReplay(); cancelDraw(); events.abort(); host.replaceChildren(); },
+    destroy() { destroyed = true; observer.disconnect(); stopReplay(); cancelDraw(); events.abort(); host.replaceChildren(); },
   };
 }
