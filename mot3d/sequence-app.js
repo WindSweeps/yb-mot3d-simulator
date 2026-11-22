@@ -111,7 +111,7 @@ function showFrame(t) {
       sample.previousDtMS = result.timesMS[f] - result.timesMS[f-1];
     }
   }
-  scene?.setSequenceFrame(sample);
+  scene?.setSequenceFrame({ ...sample, loadingSource: result });
   showImaging(sample, f);
   $('#seq-count').textContent = metric?.count ?? blank;
   $('#seq-temperature').textContent = numberOrBlank(metric?.temperatureUK, 1);
@@ -122,7 +122,7 @@ function showFrame(t) {
   const windowMS = Math.min(20, program.stages[0].durationMS);
   const onPlateau = channels.stageId === 'load' && timeMS > windowMS;
   $('#seq-window-note').textContent = onPlateau
-    ? '装载等待段显示 ' + windowMS + ' ms 的捕获云快照。交接从这批原子的相空间继续积分。'
+    ? '装载等待段使用 ' + windowMS + ' ms 的捕获云快照。轨迹图层用入射样本示意连续装载，亮纹沿飞行方向移动。'
     : '入射样本 ' + params.n + ' 个，装载轨迹积分 ' + windowMS + ' ms。当前读数取 r < 3 mm、速率 < 1 m/s 的样本，阶段末留存还要求在末段持续满足两项条件。';
 }
 

@@ -4,6 +4,34 @@ import { BEAM_DIRECTIONS, BEAM_LABELS } from './physics.js';
 const colors = [0x989afa, 0x88df7c];
 const up = new THREE.Vector3(0, 1, 0);
 
+function loadingStreamGeometry(result, waistMM) {
+  const {n, timesMS, positionsM, alive, trapped, loadWindowMS} = result;
+  const positions = [], phases = [];
+  const paths = Math.min(32, n);
+  for (let j = 0; j < paths; j++) {
+    const i = Math.floor((j + .5) * n / paths);
+    const offset = (j * .61803399) % 1;
+    for (let f = 1; f < timesMS.length && timesMS[f] <= loadWindowMS; f++) {
+      const k = f*n + i;
+      if (!alive[k-n] || !alive[k] || trapped[k-n]) break;
+      const a = 3*(k-n), b = 3*k;
+      const x0 = 1000*positionsM[a], x1 = 1000*positionsM[b];
+      // 喷流图层显示入口至光束交叠区，穿过该区域的样本在下游一个腰斑处截断。
+      const exit = x1 > waistMM;
+      const u = exit ? (waistMM-x0)/(x1-x0) : 1;
+      positions.push(x0, 1000*positionsM[a+1], 1000*positionsM[a+2]);
+      for (let axis = 0; axis < 3; axis++)
+        positions.push(1000*(positionsM[a+axis] + u*(positionsM[b+axis]-positionsM[a+axis])));
+      phases.push(timesMS[f-1] + offset, timesMS[f-1] + u*(timesMS[f]-timesMS[f-1]) + offset);
+      if (exit) break;
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('flightPhase', new THREE.Float32BufferAttribute(phases, 1));
+  return geometry;
+}
+
 export function createSequenceRender(beamGroup, atomGroup, trailGroup, addLabel) {
   const shafts = colors.map((color, channel) => BEAM_DIRECTIONS.map((direction, index) => {
     const d = new THREE.Vector3(...direction);
@@ -75,6 +103,45 @@ export function createSequenceRender(beamGroup, atomGroup, trailGroup, addLabel)
   tails.name = 'sequence-flight-segments';
   tails.frustumCulled = false;
   trailGroup.add(tails);
+  const stream = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.ShaderMaterial({
+    uniforms: {phase: {value: 0}},
+    vertexShader: `
+      attribute float flightPhase;
+      varying float pathPhase;
+      void main() {
+        pathPhase = flightPhase;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }`,
+    fragmentShader: `
+      uniform float phase;
+      varying float pathPhase;
+      void main() {
+        float pulse = pow(0.5 + 0.5*cos(6.2831853*(pathPhase-phase)), 5.0);
+        gl_FragColor = vec4(0.52, 0.82, 0.96, 0.12 + 0.65*pulse);
+      }`,
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+  }));
+  stream.name = 'sequence-loading-stream';
+  stream.visible = false;
+  trailGroup.add(stream);
+  let streamResult = null;
+  function updateLoadingStream(sample, waistMM) {
+    const visible = Boolean(sample.loadingSource && sample.stageId === 'load' && sample.incidentFlux > 0);
+    const changed = visible !== stream.visible;
+    stream.visible = visible;
+    if (!sample.loadingSource) streamResult = null;
+    if (!visible) return changed;
+    const result = sample.loadingSource;
+    if (result !== streamResult) {
+      stream.geometry.dispose();
+      stream.geometry = loadingStreamGeometry(result, waistMM);
+      streamResult = result;
+    }
+    // 亮纹随游标慢放，轨迹顶点取自同一组参数下积分得到的入射样本。
+    const elapsed = sample.elapsedMS;
+    stream.material.uniforms.phase.value = Math.log1p(elapsed) + 4*elapsed/result.stages[0].durationMS;
+    return true;
+  }
   const maxTrails = 18;
   tails.geometry.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(6 * maxTrails), 3)
     .setUsage(THREE.DynamicDrawUsage));
@@ -149,5 +216,5 @@ export function createSequenceRender(beamGroup, atomGroup, trailGroup, addLabel)
     tails.geometry.setDrawRange(0, vertices);
     return true;
   }
-  return { setFrame, cloud, tails };
+  return { setFrame, updateLoadingStream, cloud, tails };
 }

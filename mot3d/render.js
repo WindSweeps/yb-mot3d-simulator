@@ -551,17 +551,21 @@ export function mountScene(container) {
       applyFade(0); scheduleFade(); updateFluorescence(); draw();
       return;
     }
-    // 游标经过装载等待段时，每个通道及原子云都保持静止，保留上次绘图。
+    const streamChanged = sequenceRender?.updateLoadingStream(next, params.waistMM);
     if (previous && !sequenceGeometryChanged && previous.gradientGCM === next.gradientGCM &&
       (previous.incidentFlux === 0) === (next.incidentFlux === 0) &&
       previous.greenWaistMM === next.greenWaistMM && previous.positionsM?.buffer === next.positionsM?.buffer &&
       previous.positionsM?.byteOffset === next.positionsM?.byteOffset &&
       Boolean(previous.previousPositionsM) === Boolean(next.previousPositionsM) &&
       next.bluePowersMW.every((p, i) => p === previous.bluePowersMW[i]) &&
-      next.greenPowersMW.every((p, i) => p === previous.greenPowersMW[i])) return;
+      next.greenPowersMW.every((p, i) => p === previous.greenPowersMW[i])) {
+      if (streamChanged && layers.trails) draw();
+      return;
+    }
     sequenceGeometryChanged = false;
     if (!sequenceRender) {
       sequenceRender = createSequenceRender(groups.sequenceBeams, groups.sequenceAtoms, groups.sequenceTrails, label);
+      sequenceRender.updateLoadingStream(next, params.waistMM);
       line([[-.5, -.8, -.8], [.5, -.8, -.8]], 0xc8d8e6, groups.sequenceScale);
       label('1 mm', [0, -.8, -.92], groups.sequenceScale);
       updateSequenceViewport();
