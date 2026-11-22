@@ -89,7 +89,7 @@ function showFrame(t) {
     Object.assign(sample, {
       positionsM:result.positionsM.subarray(3 * start, 3 * end),
       alive:result.alive.subarray(start, end), blueRates:result.blueRates.subarray(start, end),
-      greenRates:result.greenRates.subarray(start, end), centroidMM:metric.centroidMM,
+      greenRates:result.greenRates.subarray(start, end),
     });
     if (f > 0 && timeMS - result.timesMS[f] <= .5) {
       sample.previousPositionsM = result.positionsM.subarray(3 * (start - result.n), 3 * start);

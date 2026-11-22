@@ -269,7 +269,7 @@ export function mountScene(container) {
         line([end.map(v => -v), end], 0xffffff, groups.zero, .7);
       }
       label('B = 0', [0, 0, 0], groups.zero, '#ffffff');
-      moveSequenceZero();
+      updateSequenceCenter();
       return;
     }
     if (!derived.zeroUnique || !derived.zeroMM || Math.max(...derived.zeroMM.map(Math.abs)) > 48) return;
@@ -278,11 +278,20 @@ export function mountScene(container) {
     for (let j = 0; j < 3; j++) line([p.map((v, i) => v - (i === j ? half : 0)), p.map((v, i) => v + (i === j ? half : 0))], 0xffffff, groups.zero, .7);
     label('B = 0', p, groups.zero, '#ffffff');
   }
-  function moveSequenceZero() {
+  function updateSequenceCenter() {
     const gradient = sequenceFrame.gradientGCM;
-    const zero = gradient && derived.biasG.map((b, i) => -10*b / (gradient * derived.mainTensor[i]));
-    groups.zero.visible = Boolean(zero && zero.every(v => Math.abs(v) <= 48));
-    if (groups.zero.visible) groups.zero.position.set(...zero);
+    const center = groups.zero.position;
+    if (gradient === 0) center.set(0, 0, 0);
+    else center.set(...derived.biasG.map((b, i) => -10 * b / (gradient * derived.mainTensor[i])));
+    const locked = activeView === 'cloud';
+    groups.zero.visible = gradient !== 0 && (locked || Math.max(Math.abs(center.x), Math.abs(center.y), Math.abs(center.z)) <= 48);
+    groups.sequenceScale.position.copy(center);
+    if (locked && !controls.target.equals(center)) {
+      // 同步平移相机和旋转中心，保留用户设置的视角和观察距离。
+      camera.position.sub(controls.target).add(center);
+      controls.target.copy(center);
+      controls.update();
+    }
   }
   function buildField() {
     clear(groups.field);
@@ -357,7 +366,9 @@ export function mountScene(container) {
     groups.sequenceTrails.visible = sequence && layers.trails;
     if (sequenceRender) sequenceRender.cloud.material.uniforms.fluorescence.value = layers.fluorescence;
     groups.densityScale.visible = !sequence && activeView === 'cloud';
-    groups.sequenceScale.visible = sequence && activeView === 'cloud' && Boolean(sequenceFrame.centroidMM);
+    const lockedOnField = sequence && activeView === 'cloud';
+    groups.sequenceScale.visible = lockedOnField;
+    controls.enablePan = !lockedOnField;
     groups.source.visible = sequence || mode !== 'density';
   }
   let points = null, heldPoints = null, densityPoints = null, freeDensity = null, trailLines = null;
@@ -480,7 +491,7 @@ export function mountScene(container) {
       obj.geometry.dispose(); obj.geometry = new THREE.BufferGeometry(); obj.geometry.setDrawRange(0, 0);
     }
     if (result) {
-      if (activeView === 'cloud' && result.summary.centroidMM) {
+      if (!sequenceFrame && activeView === 'cloud' && result.summary.centroidMM) {
         const center = vector(result.summary.centroidMM), shift = center.clone().sub(cloudFocus);
         camera.position.add(shift); controls.target.add(shift); cloudFocus.copy(center);
         controls.update();
@@ -558,20 +569,12 @@ export function mountScene(container) {
     if (!previous) buildZero();
     if (!previous || Math.sign(previous.gradientGCM) !== Math.sign(next.gradientGCM)) buildCoils();
     mainCoilLabel.el.textContent = `主线圈 · ${params.mainAxis.toUpperCase()} · ${Number(next.gradientGCM.toFixed(2))} G/cm`;
-    moveSequenceZero();
-    if (next.centroidMM) groups.sequenceScale.position.set(...next.centroidMM);
+    updateSequenceCenter();
     if (sequenceRender.setFrame(next, params.waistMM)) {
       motionSince = performance.now();
       applyFade(1);
     }
     updateVisibility();
-    if (activeView === 'cloud' && next.centroidMM) {
-      const center = vector(next.centroidMM), shift = center.clone().sub(cloudFocus);
-      if (shift.lengthSq() > 1e-12) {
-        controls.target.add(shift); camera.position.add(shift); cloudFocus.copy(center);
-        controls.update();
-      }
-    }
     scheduleFade(); draw();
   }
   function updateSequenceViewport() {
@@ -596,8 +599,14 @@ export function mountScene(container) {
   }
   function setView(view) {
     activeView = view;
-    const center = view === 'cloud' ? vector(sequenceFrame?.centroidMM ?? result?.summary.centroidMM ?? [0, 0, 0]) : new THREE.Vector3(-4, 0, 0);
-    if (view === 'cloud') cloudFocus.copy(center);
+    const center = new THREE.Vector3(-4, 0, 0);
+    if (view === 'cloud') {
+      if (sequenceFrame) center.copy(groups.zero.position);
+      else {
+        center.fromArray(result?.summary.centroidMM ?? [0, 0, 0]);
+        cloudFocus.copy(center);
+      }
+    }
     const offsets = { iso: [61, -79, 55], xy: [0, 0, 110], xz: [0, -110, 0], yz: [110, 0, 0], cloud: [3, -4.3, 3] };
     camera.up.set(0, 0, 1); if (view === 'xy') camera.up.set(0, 1, 0);
     if (mode === 'force') center.set(0, 0, 0);
