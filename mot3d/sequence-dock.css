@@ -86,7 +86,8 @@
 .dock-panel .seq-imager { padding-block: 10px; }
 .dock-panel .si-step-controls { margin-block: 8px; }
 @container (max-width: 490px) {
-  .dock-panel .seq-ruler-row, .dock-panel .seq-lane { grid-template-columns: 70px minmax(0,1fr) 72px; column-gap: 3px; }
+  .dock-panel .seq-chart { --seq-chart-gap: 3px; }
+  .dock-panel .seq-ruler-row, .dock-panel .seq-lane { grid-template-columns: 70px minmax(0,1fr) 72px; }
   .dock-panel .seq-label { padding-left: 6px; }
   .dock-panel .seq-value, .dock-panel .seq-readout-head { padding-right: 6px; }
   .dock-panel .seq-tick:nth-child(2), .dock-panel .seq-tick:nth-child(4) { display: none; }

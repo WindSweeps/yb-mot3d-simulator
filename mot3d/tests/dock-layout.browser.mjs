@@ -59,9 +59,31 @@ async function drop(from, onto, side) {
   await page.mouse.move(end.x,end.y,{steps:3});
   await settled();
   await page.mouse.up();
+  assert.equal(await selectedText(),'','docking tabs must not leave selected text');
   await settled();
 }
 const selectedText = () => page.evaluate(() => document.getSelection().toString());
+async function checkTimelineDrag() {
+  const end=await find('.seq-readout-head').boundingBox();
+  for (const [selector, edge] of [['.seq-ruler',false],['.seq-plot',false],['.seq-plot',true]]) {
+    const start=await find(selector).first().boundingBox();
+    const x=edge ? start.x-1 : start.x+start.width/2;
+    const y=start.y+start.height/2;
+    await clock.focus();
+    await page.mouse.move(x,y);
+    await page.mouse.down();
+    assert.ok(Number(await clock.inputValue())<Number(await clock.getAttribute('max')),selector+' starts from the pressed position');
+    await page.mouse.move(end.x+end.width/2,end.y+end.height/2,{steps:12});
+    const duringDrag=await selectedText();
+    await page.mouse.up();
+    assert.equal(duringDrag,'',selector+' drag must not select time labels or readouts');
+    assert.equal(await selectedText(),'',selector+' drag must not leave selected text');
+    assert.equal(await clock.inputValue(),await clock.getAttribute('max'),selector+' drag tracks beyond the plot');
+    await page.mouse.move(x,y);
+    assert.equal(await clock.inputValue(),await clock.getAttribute('max'),selector+' drag ends on pointer release');
+  }
+  await find('.seq-slider').press('Home');
+}
 async function resizeSeparator(orientation, dx, dy) {
   const sash=host.getByRole('separator').and(host.locator('.dv-sash.dv-enabled[aria-orientation="'+orientation+'"]')).first();
   await sash.scrollIntoViewIfNeeded();
@@ -165,6 +187,7 @@ try {
   assert.ok(groupOf(standard,'imaging').y>groupOf(standard,'scene').y);
   assert.deepEqual(groupOf(standard,'imaging').tabs,['imaging','readings']);
   assert.equal(groupOf(standard,'imaging').active,'imaging');
+  await checkTimelineDrag();
   await resizeSeparator('horizontal',-210,-90);
   assert.ok(groupOf(await layout(),'scene').h<groupOf(standard,'scene').h-20,'separator changes row heights');
   await checkTextSelection();

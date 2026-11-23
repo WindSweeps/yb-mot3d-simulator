@@ -59,7 +59,8 @@ export function mountSequenceEditor(host, { onChange, onTime, onInvalid } = {}) 
     <div class="seq-reference"><a href="https://arxiv.org/pdf/2503.24383v2#page=3" target="_blank" rel="noopener">论文实验参数 ↗</a>
     <a href="https://m-labs.hk/artiq/manual/rtio.html#timeline-and-output-events" target="_blank" rel="noopener">ARTIQ 时间游标 ↗</a></div>`;
   const get = selector => host.querySelector(selector);
-  const ruler = get('.seq-ruler'), slider = get('.seq-slider'), cursorInput = get('.seq-time-input input');
+  const chart = get('.seq-chart');
+  const slider = get('.seq-slider'), cursorInput = get('.seq-time-input input');
   const rulerTicks = get('.seq-ticks');
   const play = get('[data-action=play]'), form = get('.seq-fields'), error = get('.seq-error');
   const title = get('.seq-form-head h3'), span = get('.seq-stage-span'), note = get('.seq-note');
@@ -277,15 +278,19 @@ export function mountSequenceEditor(host, { onChange, onTime, onInvalid } = {}) 
     const rect = rulerTicks.getBoundingClientRect();
     setTime(physicalTime((event.clientX - rect.left) / rect.width));
   }
-  listen(get('.seq-chart'), 'pointerdown', event => {
-    if (!enabled || !valid || !event.isPrimary || event.button !== 0) return;
-    if (ruler.contains(event.target)) ruler.setPointerCapture(event.pointerId);
-    else if (!event.target.closest('.seq-plot')) return;
+  listen(chart, 'pointerdown', event => {
+    if (!event.isPrimary || event.button !== 0 || !event.target.closest('.seq-ruler, .seq-plot')) return;
+    event.preventDefault();
+    if (!enabled || !valid) return;
+    const focused = document.activeElement;
+    if (focused instanceof HTMLElement && host.contains(focused)) focused.blur();
+    if (!enabled || !valid) return;
+    chart.setPointerCapture(event.pointerId);
     pause();
     seekAtPointer(event);
   });
-  listen(ruler, 'pointermove', event => {
-    if (enabled && valid && ruler.hasPointerCapture(event.pointerId)) seekAtPointer(event);
+  listen(chart, 'pointermove', event => {
+    if (enabled && valid && chart.hasPointerCapture(event.pointerId)) seekAtPointer(event);
   });
   program.stages.forEach((s, i) => {
     const button = element('button', 'seq-phase');
