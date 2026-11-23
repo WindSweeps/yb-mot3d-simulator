@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import { loadPopulation, sequencePopulation } from './sequence-population.js';
+import { loadPopulation, sequenceLossStages, sequencePopulation } from './sequence-population.js';
+import { compileSequence, songSequence } from './sequence.js';
+import { simulateSequence } from './sequence-physics.js';
 
 function near(actual, expected, tolerance = 2e-13) {
   assert.ok(Math.abs(actual - expected) <= tolerance * Math.abs(expected), `${actual} ≠ ${expected}`);
@@ -33,17 +35,68 @@ near(loadPopulation(1e-17, flux, p, alpha, beta), rate * 1e-20);
 near(loadPopulation(1, 1e308, 1, 1e-300, 0), 1e305);
 near(loadPopulation(1e-322, 1e308, 1, 0, 0), 1e305 * 1e-322);
 near(loadPopulation(100000, 1e308, 1, 1e308, 1e308), (Math.sqrt(5) - 1) / 2);
-const lossless = {flux: 1e9, alpha: 0, beta: 0};
-const population = sequencePopulation(5000, 4000, 1000, lossless);
-assert.equal(population.at(1000, 70), 2.5e8);
-assert.equal(population.at(5000, 1000), 1.25e9);
-assert.equal(population.at(5111, 800), 1e9);
-assert.equal(population.weightAt(5111, 800) * 800, 1e9);
-assert.equal(sequencePopulation(5000, 8000, 2000, lossless).at(5111, 1600), 1e9);
-assert.equal(sequencePopulation(5000, 4000, 0, lossless).at(5111, 0), 0);
-assert.equal(sequencePopulation(5000, 4000, 1000, {...lossless, flux:0}).at(5111, 800), 0);
+const song = songSequence(), program = compileSequence(song);
+function coefficients(config) {
+  return sequenceLossStages(compileSequence({...song, ...config})).map(s => [s.light, s.alpha, s.beta]);
+}
+const greenHold = ['green', .012, 0], dark = ['dark', .012, 0];
+assert.deepEqual(coefficients({}), [['twoColor', .53, 1.7e-9], ['twoColor', .21, 1e-9], greenHold, greenHold]);
+assert.deepEqual(coefficients({greenEnabled:false}), [['blue', 1.3, 27e-9], ['blue', .54, 44e-9], dark, dark]);
+assert.deepEqual(coefficients({blueEnabled:false}), [greenHold, greenHold, greenHold, greenHold]);
+assert.deepEqual(coefficients({blueEnabled:false, greenEnabled:false}), [dark, dark, dark, dark]);
+assert.deepEqual(coefficients({blueObliqueMW:0, blueHorizontalMW:0, greenObliqueMW:0, greenHorizontalMW:0}),
+  [dark, dark, dark, greenHold]);
+
+// 原点上无重力和反冲的原子在对称光场中静止，可逐阶段直接对照论文式 (2)、(3)。
+const params = {n:2, dtUS:20, gravity:false, recoil:false};
+const held = simulateSequence(params, song, {initialStates: [0,0,0,0,0,0, 0,0,0,0,0,0]});
+assert.deepEqual(held.summary, {N0:2, N1:2, N2:2});
+const loaded = loadPopulation(5000, 8.4e7, 1, .53, 1.7e-9);
+// 用表 II 的装载率代入双色损失模型，与论文给出的稳态原子数比较。
+near(loadPopulation(60000, 8.4e7, 1, .53, 1.7e-9), 1.15e8, .01);
+near(loaded, 1.14165484e8, 1e-8);
+function equation3(initial, seconds, a, b) {
+  if (a === 0) return initial / (1 + initial * b * seconds);
+  return a * initial / (a * Math.exp(a * seconds) + b * initial * Math.expm1(a * seconds));
+}
+const transferred = equation3(loaded, .001, .21, 1e-9);
+const received = transferred * Math.exp(-.012 * .010);
+const compressed = received * Math.exp(-.012 * .100);
+const population = sequencePopulation(program, held, {flux:8.4e7});
+near(population.loaded, loaded);
+near(population.at(5000.53, 2), equation3(loaded, .00053, .21, 1e-9));
+near(population.at(5001, 2), transferred);
+near(population.estimatedAtoms.N1, received);
+near(population.estimatedAtoms.N2, compressed);
+near(population.weightAt(5111, 2) * 2, compressed);
+const onlyOne = sequencePopulation(program, held, {flux:8.4e7, handoffBeta:0});
+near(onlyOne.at(5001, 2), loaded * Math.exp(-.21 * .001));
+const onlyTwo = sequencePopulation(program, held, {flux:8.4e7, compressAlpha:0, compressBeta:2e-8});
+near(onlyTwo.estimatedAtoms.N2, equation3(received, .100, 0, 2e-8));
+assert.throws(() => sequencePopulation(program, held, {flux:8.4e7, greenAlpha:-1}), RangeError);
+
+// 按真实入射冷束检查轨迹逃逸只在阱内计数处扣除；双体衰减可由 1/w 的时间积分独立检验。
+const run = simulateSequence({n:48, seed:399174}, song);
+assert.ok(run.N0 > run.N2 && run.N2 > 0);
+const lossless = {flux:1e9, alpha:0, beta:0, handoffAlpha:0, handoffBeta:0, greenAlpha:0, greenBeta:0,
+  compressAlpha:0, compressBeta:0};
+const withoutLoss = sequencePopulation(program, run, lossless);
+const initialWeight = 1e9 * 5 / run.n;
+near(withoutLoss.estimatedAtoms.N0, run.N0 * initialWeight);
+near(withoutLoss.estimatedAtoms.N1, run.N1 * initialWeight);
+near(withoutLoss.estimatedAtoms.N2, run.N2 * initialWeight);
+const b = 7e-9;
+const withPairs = sequencePopulation(program, run, {...lossless, handoffBeta:b, greenBeta:b, compressBeta:b});
+let countSeconds = 0;
+for (let f = run.timesMS.indexOf(song.loadMS); f + 1 < run.timesMS.length; f++)
+  countSeconds += run.metrics[f].count * (run.timesMS[f + 1] - run.timesMS[f]) / 1000;
+near(withPairs.estimatedAtoms.N2, run.N2 / (1 / initialWeight + b * countSeconds));
+assert.deepEqual(sequencePopulation(program, run, {flux:0}).estimatedAtoms, {N0:0, N1:0, N2:0});
+const empty = simulateSequence({n:1, gravity:false, recoil:false}, song, {initialStates:[.04,0,0,0,0,0]});
+assert.equal(empty.summary.N0, 0);
+assert.deepEqual(sequencePopulation(program, empty, {flux:1e9}).estimatedAtoms, {N0:0, N1:0, N2:0});
 for (const [index, value] of [[0, -1], [1, Infinity], [2, -1], [2, 1.1], [3, NaN], [4, -.1]]) {
   const args = [100, flux, p, alpha, beta]; args[index] = value;
   assert.throws(() => loadPopulation(...args), RangeError);
 }
-console.log('已验证装载方程、零损失与单类损失极限、5 s 数值积分及浮点稳定性。');
+console.log('已验证宋博组表 II 系数、式 (2) 与 (3)、真实轨迹的阱内计数及双体衰减。');

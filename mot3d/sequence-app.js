@@ -3,7 +3,7 @@ import { compileSequence, sequenceAt, SEQUENCE_PRESETS } from './sequence.js';
 import { mountSequenceEditor } from './sequence-ui.js';
 import { mountScene } from './render.js';
 import { DEFAULT_FLUX } from './fluorescence.js';
-import { sequencePopulation } from './sequence-population.js';
+import { sequenceLossStages, sequencePopulation } from './sequence-population.js';
 import { fluorescenceExposure, sequenceFrameAt } from './sequence-exposure.js';
 import { mountImagingPanel, validateImagingSettings } from './sequence-imaging-view.js';
 import { mountSequenceDock } from './sequence-dock.js';
@@ -15,6 +15,7 @@ const form = $('#sequence-inputs');
 const fields = Array.from(form.elements);
 const loadingForm = $('#seq-loading-inputs');
 const loadingFields = Array.from(loadingForm.elements);
+const lossRows = Array.from(loadingForm.querySelectorAll('[data-loss-stage]'));
 const formatId = 'yb-mot-sequence-v1';
 const blank = '—';
 const maxFileBytes = 256000;
@@ -30,8 +31,7 @@ const requestedPreset = new URLSearchParams(location.search).get('preset');
 const initialPreset = SEQUENCE_PRESETS.find(preset => preset.id === requestedPreset) ?? SEQUENCE_PRESETS[0];
 let params = await initialInputs(), program = compileSequence(initialPreset.config), timeMS = 0;
 let geometry = derive(params);
-const referenceLoss = { flux:params.incidentFlux ?? DEFAULT_FLUX, alpha:.53, beta:1.7e-9 };
-let loading = { ...referenceLoss };
+let loading = { flux:params.incidentFlux ?? DEFAULT_FLUX };
 let worker = null, timer = 0, job = 0, result = null, scene = null, population = null;
 let editValid = true, suspended = false, started = 0;
 
@@ -48,11 +48,23 @@ async function initialInputs() {
 
 function fillInputs() {
   for (const field of fields) field.value = String(params[field.name]);
-  for (const field of loadingFields) field.value = String(loading[field.name]);
+  for (const field of loadingFields) field.value = loading[field.name] ?? '';
   const bias = params.biasCurrentA.map((value, i) => +(value * params.biasPerAmp[i]).toFixed(3));
   $('#sequence-geometry').textContent = '冷束沿 +X 入射，两组斜光在 XZ 平面内夹 120°。主轴 ' +
     params.mainAxis.toUpperCase() + '，偏置场 (X, Y, Z) = (' + bias.join(', ') + ') G。重力' +
     (params.gravity ? '已开启' : '已关闭') + '，随机反冲' + (params.recoil ? '已开启' : '已关闭') + '。从蓝 MOT 工作台进入时沿用其冷束、几何及偏置设置。';
+}
+
+function showReferenceLoss() {
+  const labels = {blue:'蓝光', green:'绿光', twoColor:'双色光', dark:'无光'};
+  const stages = sequenceLossStages(program);
+  for (const row of lossRows) {
+    const stage = stages[Number(row.dataset.lossStage)];
+    row.querySelector('small').textContent = labels[stage.light];
+    const [alpha, beta] = row.querySelectorAll('input');
+    alpha.placeholder = String(stage.alpha);
+    beta.placeholder = String(stage.beta);
+  }
 }
 
 function stageAt(t) {
@@ -79,16 +91,17 @@ function showAtoms(output, count) {
 function summarize() {
   const counts = result?.summary;
   population = result && loadingForm.checkValidity()
-    ? sequencePopulation(program.stages[0].durationMS, result.n, counts.N0, loading) : null;
+    ? sequencePopulation(program, result, loading) : null;
+  const atoms = population?.estimatedAtoms;
   for (const key of ['N0','N1','N2']) {
     const suffix = key.toLowerCase();
     $('#seq-' + suffix).textContent = counts?.[key] ?? blank;
-    showAtoms($('#seq-atoms-' + suffix), population && population.transferWeight * counts[key]);
+    showAtoms($('#seq-atoms-' + suffix), atoms?.[key]);
   }
   $('#seq-e0').textContent = efficiency(counts?.N0, result?.n);
-  $('#seq-e1').textContent = efficiency(counts?.N1, counts?.N0);
-  $('#seq-e2').textContent = efficiency(counts?.N2, counts?.N1);
-  $('#seq-transfer').textContent = efficiency(counts?.N2, counts?.N0);
+  $('#seq-e1').textContent = efficiency(atoms?.N1, atoms?.N0);
+  $('#seq-e2').textContent = efficiency(atoms?.N2, atoms?.N1);
+  $('#seq-transfer').textContent = efficiency(atoms?.N2, atoms?.N0);
 }
 
 function showFrame(t) {
@@ -194,6 +207,7 @@ function cancelRun() {
 }
 
 function recalculate() {
+  showReferenceLoss();
   cancelRun();
   if (!editValid || !form.checkValidity()) {
     status('请完成有效的时序与模拟参数。');
@@ -257,7 +271,7 @@ $('#sequence-export').addEventListener('click', () => {
   const file = { format:formatId, presetId:preset.id, presetName:preset.name, config:editor.getConfig(),
     params, loading, imaging:imaging.getSettings(), summary:result?.summary ?? null };
   if (population) {
-    file.estimatedAtoms = Object.fromEntries(Object.entries(result.summary).map(([key, n]) => [key, n * population.transferWeight]));
+    file.estimatedAtoms = population.estimatedAtoms;
   }
   const url = URL.createObjectURL(new Blob([JSON.stringify(file, null, 2)], {type:'application/json'}));
   const a = document.createElement('a'); a.href = url;
@@ -282,11 +296,14 @@ $('#sequence-file').addEventListener('change', async event => {
           (field.options && !Array.from(field.options, o => Number(o.value)).includes(v)))
         throw new Error('模拟参数超出可编辑范围 · ' + field.name);
     }
-    const importedLoading = data.loading ?? { ...referenceLoss, flux:imported.incidentFlux ?? DEFAULT_FLUX };
+    if (data.loading != null && (typeof data.loading !== 'object' || Array.isArray(data.loading)))
+      throw new Error('通量和损失参数须保存在 JSON 对象中。');
+    const importedLoading = { flux:imported.incidentFlux ?? DEFAULT_FLUX, ...data.loading };
     for (const field of loadingFields) {
+      if (!(field.name in importedLoading)) continue;
       const v = importedLoading[field.name];
       if (!Number.isFinite(v) || v < Number(field.min) || v > Number(field.max))
-        throw new Error('装载参数超出可编辑范围 · ' + field.name);
+        throw new Error('通量或损失系数超出可编辑范围 · ' + field.name);
     }
     const cameraSettings = validateImagingSettings(data.imaging);
     suspended = true;
@@ -318,7 +335,7 @@ for (const button of document.querySelectorAll('[data-checkpoint]')) button.addE
 form.addEventListener('submit', event => event.preventDefault());
 loadingForm.addEventListener('input', () => {
   if (loadingForm.checkValidity()) {
-    loading = Object.fromEntries(loadingFields.map(field => [field.name, field.valueAsNumber]));
+    loading = Object.fromEntries(loadingFields.filter(field => field.value !== '').map(field => [field.name, field.valueAsNumber]));
   }
   summarize();
   $('#sequence-export').disabled = !form.checkValidity() || !editValid || !loadingForm.checkValidity() || !imaging.isValid();

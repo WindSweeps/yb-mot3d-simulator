@@ -39,6 +39,12 @@
 .sequence-loading-controls form { display:grid; gap:8px; margin:8px 0; }
 .sequence-loading-controls label { display:grid; grid-template-columns:minmax(0,1fr) minmax(72px,38%); gap:8px; align-items:center; }
 .sequence-loading-controls input { width:100%; min-width:0; }
+.sequence-loss-table { width:100%; table-layout:fixed; border-collapse:collapse; }
+.sequence-loss-table th,.sequence-loss-table td { padding:4px; text-align:left; font-weight:400; }
+.sequence-loss-table th:first-child { padding-left:0; }
+.sequence-loss-table thead,.sequence-loss-table small { color:var(--muted); }
+.sequence-loss-table small { display:block; font-size:inherit; }
+.sequence-loss-table input::placeholder { color:var(--muted); opacity:1; }
 .sequence-apparatus summary,.sequence-method summary { font-size:var(--body); cursor:pointer; }
 .sequence-apparatus form { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin:14px 0; }
 .sequence-apparatus label { display:flex; flex-direction:column; gap:5px; font-size:var(--meta); color:var(--muted); }

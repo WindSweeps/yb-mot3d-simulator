@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {mkdir} from 'node:fs/promises';
+import {mkdir, readFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 
 const url = process.argv[2] ?? 'http://127.0.0.1:4174/mot3d/sequence.html';
@@ -172,13 +172,34 @@ async function checkPopulation(page, high) {
   const full=await read();
   const {N0,N1,N2}=high.counts;
   assert.deepEqual(full.counts,[N0,N1,N2,N2]);
+  const [loadStage, handoffStage, receiveStage, compressStage] = await page.evaluate(() => window.sequenceScaleTest.result.stages);
   const rate=1e9*N0/high.n, alpha=.53, beta=1.7e-9;
-  const lambda=Math.sqrt(alpha**2+4*beta*rate), exponential=Math.exp(-5*lambda);
+  const lambda=Math.sqrt(alpha**2+4*beta*rate), exponential=Math.exp(-loadStage.durationMS*lambda/1000);
   const loading=2*rate*(1-exponential)/(lambda+alpha+(lambda-alpha)*exponential);
-  for(const [i,factor] of [1,N1/N0,N2/N0,N2/N0].entries()) {
-    assert.ok(Math.abs(full.population[i]-factor*loading)<.001);
-  }
+  assert.ok(Math.abs(full.population[0]-loading)<.001);
+  assert.equal(full.population[3],full.population[2]);
+  const compressMS = compressStage.durationMS;
+  const expectedFinal = full.population[1] * N2/N1 * Math.exp(-.012 * compressMS/1000);
+  assert.ok(Math.abs(full.population[2]-expectedFinal)<.001);
   await page.locator('.sequence-loading-controls > summary').click();
+  const form = page.locator('#seq-loading-inputs');
+  const handoffBeta = form.locator('[name=handoffBeta]');
+  assert.equal(await handoffBeta.getAttribute('placeholder'),'1e-9');
+  await handoffBeta.fill('0');
+  const oneBody = await read();
+  const afterHandoff = loading * Math.exp(-.21*handoffStage.durationMS/1000);
+  assert.ok(Math.abs(oneBody.population[1] - afterHandoff * N1/N0 * Math.exp(-.012*receiveStage.durationMS/1000)) < .001);
+  assert.ok(oneBody.population[1] > full.population[1]);
+  await handoffBeta.fill('');
+  assert.deepEqual(await read(),full);
+  const compressAlpha = form.locator('[name=compressAlpha]');
+  await compressAlpha.fill('2');
+  const fasterDecay = await read();
+  assert.deepEqual(fasterDecay.counts,full.counts);
+  assert.equal(fasterDecay.population[1],full.population[1]);
+  assert.ok(Math.abs(fasterDecay.population[2]/full.population[2] - Math.exp(-(2-.012)*compressMS/1000)) < 1e-10);
+  assert.equal(fasterDecay.jobs,full.jobs);
+  await compressAlpha.fill('');
   const flux=page.locator('#seq-loading-inputs [name=flux]');
   const original=await flux.inputValue();
   await flux.fill('0');
@@ -194,6 +215,23 @@ async function checkPopulation(page, high) {
   await tab('相机成像').click();
   await page.waitForFunction(()=>Number(document.querySelector('#seq-imaging-total').dataset.value)>0);
   await tab('原子样本').click();
+  const compressBeta = form.locator('[name=compressBeta]');
+  await compressBeta.fill('1e-8');
+  const withPairLoss = await read();
+  assert.ok(withPairLoss.population[2] < full.population[2]);
+  const download = page.waitForEvent('download');
+  await page.locator('#sequence-export').click();
+  const path = await (await download).path();
+  const saved = JSON.parse(await readFile(path, 'utf8'));
+  assert.deepEqual(saved.loading, {flux:1e9, compressBeta:1e-8});
+  assert.equal(saved.estimatedAtoms.N2, withPairLoss.population[2]);
+  await compressBeta.fill('');
+  const previousJob = await page.evaluate(() => window.sequenceScaleTest.jobs.at(-1).id);
+  await page.locator('#sequence-file').setInputFiles(path);
+  await waitForResult(page, previousJob);
+  assert.equal(await compressBeta.inputValue(), '1e-8');
+  assert.deepEqual((await read()).population.slice(0,3), withPairLoss.population.slice(0,3));
+  await compressBeta.fill('');
   return full.population;
 }
 
