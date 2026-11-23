@@ -1,5 +1,5 @@
 import { DEFAULTS, compile, derive, magneticCenterMM } from './physics.js';
-import { compileSequence, sequenceAt, songSequence } from './sequence.js';
+import { compileSequence, sequenceAt, SEQUENCE_PRESETS } from './sequence.js';
 import { mountSequenceEditor } from './sequence-ui.js';
 import { mountScene } from './render.js';
 import { DEFAULT_FLUX } from './fluorescence.js';
@@ -26,7 +26,9 @@ function scientificCount(value) {
   return mantissa + ' × 10' + power;
 }
 const computeShader = $('#sequence-compute').textContent;
-let params = await initialInputs(), program = compileSequence(songSequence()), timeMS = 0;
+const requestedPreset = new URLSearchParams(location.search).get('preset');
+const initialPreset = SEQUENCE_PRESETS.find(preset => preset.id === requestedPreset) ?? SEQUENCE_PRESETS[0];
+let params = await initialInputs(), program = compileSequence(initialPreset.config), timeMS = 0;
 let geometry = derive(params);
 const referenceLoss = { flux:params.incidentFlux ?? DEFAULT_FLUX, alpha:.53, beta:1.7e-9 };
 let loading = { ...referenceLoss };
@@ -142,6 +144,14 @@ function showImaging(sceneSample, f) {
 }
 
 const editor = mountSequenceEditor($('#sequence-editor'), {
+  initialPreset,
+  onPreset(id) {
+    const url = new URL(location.href);
+    if (id === 'imported') url.searchParams.delete('preset');
+    else url.searchParams.set('preset', id);
+    history.replaceState(history.state, '', url);
+    $('#sequence-file-status').textContent = '';
+  },
   onTime:showFrame,
   onChange(config, compiled) {
     editValid = true;
@@ -243,12 +253,15 @@ function initializeScene() {
 }
 
 $('#sequence-export').addEventListener('click', () => {
-  const file = { format:formatId, config:editor.getConfig(), params, loading, imaging:imaging.getSettings(), summary:result?.summary ?? null };
+  const preset = editor.getPreset();
+  const file = { format:formatId, presetId:preset.id, presetName:preset.name, config:editor.getConfig(),
+    params, loading, imaging:imaging.getSettings(), summary:result?.summary ?? null };
   if (population) {
     file.estimatedAtoms = Object.fromEntries(Object.entries(result.summary).map(([key, n]) => [key, n * population.transferWeight]));
   }
   const url = URL.createObjectURL(new Blob([JSON.stringify(file, null, 2)], {type:'application/json'}));
-  const a = document.createElement('a'); a.href = url; a.download = 'yb-mot-sequence.json';
+  const a = document.createElement('a'); a.href = url;
+  a.download = preset.id === 'imported' ? 'yb-mot-sequence.json' : preset.name.replace(':', '-') + '.json';
   document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
 });
 
@@ -278,7 +291,11 @@ $('#sequence-file').addEventListener('change', async event => {
     const cameraSettings = validateImagingSettings(data.imaging);
     suspended = true;
     params = imported; loading = { ...importedLoading }; fillInputs();
-    imaging.setSettings(cameraSettings); editor.replace(compiled.config);
+    imaging.setSettings(cameraSettings);
+    editor.replace(compiled.config, {
+      presetId:data.presetId, name:typeof data.presetName === 'string' && data.presetName.trim()
+        ? data.presetName : file.name.replace(/\.json$/i, ''),
+    });
     $('#sequence-file-status').textContent = '已载入 ' + file.name;
   } catch (e) {
     $('#sequence-file-status').textContent = '导入未完成 · ' + e.message;

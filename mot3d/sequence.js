@@ -37,6 +37,24 @@ export function songSequence() {
   };
 }
 
+export const SEQUENCE_PRESETS = Object.freeze([
+  Object.freeze({
+    id: 'arxiv-2503.24383v2', name: 'arXiv:2503.24383v2',
+    config: Object.freeze(songSequence()),
+  }),
+  Object.freeze({
+    id: 'ai-20261123-gpt62astra', name: 'ai优化+2026-11-23+GPT6.2astra',
+    config: Object.freeze({ ...songSequence(), greenMS: 7.2, compressMS: 102.8,
+      receiveMHz: -3.15, compressMHz: -0.54, receiveGradient: 2.3, finalGradient: 13.2,
+      finalObliqueUW: 18.1, finalHorizontalUW: 17.9, powerRamp: 'geometric' }),
+  }),
+]);
+
+export function matchingSequencePreset(config) {
+  return SEQUENCE_PRESETS.find(preset =>
+    Object.entries(preset.config).every(([key, value]) => config[key] === value));
+}
+
 export function compileSequence(input) {
   const config = { ...input };
   for (const [key, [label, unit, min, max]] of Object.entries(SEQUENCE_FIELDS)) {

@@ -1,4 +1,4 @@
-import { compileSequence, songSequence, sequenceAt, SEQUENCE_FIELDS } from './sequence.js';
+import { compileSequence, matchingSequencePreset, sequenceAt, SEQUENCE_FIELDS, SEQUENCE_PRESETS } from './sequence.js';
 
 const phases = [
   { keys: ['loadMS', 'blueDetuningMHz', 'shieldingMHz', 'loadGradient', 'blueObliqueMW', 'blueHorizontalMW', 'greenObliqueMW', 'greenHorizontalMW'],
@@ -6,9 +6,9 @@ const phases = [
   { keys: ['handoffMS', 'receiveMHz', 'receiveGradient'],
     note: '交接开始时绿光跳到红失谐，随后关断 399 nm 接收光。论文给出蓝光关断不超过 1 ms；蓝光和磁场梯度采用线性变化，表示模拟中的时序假设。' },
   { keys: ['greenMS', 'receiveMHz', 'receiveGradient', 'greenObliqueMW', 'greenHorizontalMW'],
-    note: '接收阶段维持高功率绿光。10 ms 为可调的停留时间假设，接收失谐、功率和梯度与交接终点共用。' },
+    note: '接收阶段维持高功率绿光，失谐、功率和梯度与交接终点共用。' },
   { keys: ['compressMS', 'compressMHz', 'finalGradient', 'finalObliqueUW', 'finalHorizontalUW', 'powerRamp'],
-    note: '压缩开始时绿光跳频，功率在 100 ms 内降低，梯度同步升高。论文给出 30.5 mW 光束的终点 35 µW。水平光的默认终点按初始功率比例换算，斜坡形状可调。' },
+    note: '压缩开始时切换绿光失谐。斜光和水平光各自按所选曲线降至末端功率，主轴梯度线性变化。' },
 ];
 const channels = [
   { label: '399 nm 光闸', tone: 'blue', value: s => Number(s.blueOn), gate: true },
@@ -32,15 +32,17 @@ function element(tag, className, text) {
   return node;
 }
 
-export function mountSequenceEditor(host, { onChange, onTime, onInvalid } = {}) {
-  let program = compileSequence(songSequence());
+export function mountSequenceEditor(host, { initialPreset = SEQUENCE_PRESETS[0], onPreset, onChange, onTime, onInvalid } = {}) {
+  let activePreset = initialPreset, importedPreset = null;
+  let program = compileSequence(activePreset.config);
   let timeMS = 0, activePhase = 0, scale = 'phase', playback = 0, lastTick = 0;
   let enabled = true, valid = true;
   let exposureUS = 0;
   host.classList.add('seq-editor');
   host.innerHTML = `
     <div class="seq-title"><div><h2>时序通道</h2><p>各通道共用实验时间，光功率为六束单向光之和。</p></div>
-      <button type="button" class="small-button" data-action="reset">恢复论文预设</button></div>
+      <div class="seq-presets"><label>时序预设<select data-action="preset"></select></label>
+      <button type="button" class="small-button" data-action="reset">恢复时序预设</button></div></div>
     <div class="seq-chart-head"><div class="seq-gates" role="group" aria-label="时序光路开关">
       <label><input type="checkbox" data-gate="blueEnabled">399 nm 光路</label>
       <label><input type="checkbox" data-gate="greenEnabled">556 nm 光路</label></div>
@@ -59,6 +61,9 @@ export function mountSequenceEditor(host, { onChange, onTime, onInvalid } = {}) 
     <div class="seq-reference"><a href="https://arxiv.org/pdf/2503.24383v2#page=3" target="_blank" rel="noopener">论文实验参数 ↗</a>
     <a href="https://m-labs.hk/artiq/manual/rtio.html#timeline-and-output-events" target="_blank" rel="noopener">ARTIQ 时间游标 ↗</a></div>`;
   const get = selector => host.querySelector(selector);
+  const presetSelect = get('[data-action=preset]');
+  for (const preset of SEQUENCE_PRESETS) presetSelect.add(new Option(preset.name, preset.id));
+  presetSelect.value = activePreset.id;
   const chart = get('.seq-chart');
   const slider = get('.seq-slider'), cursorInput = get('.seq-time-input input');
   const rulerTicks = get('.seq-ticks');
@@ -305,7 +310,17 @@ export function mountSequenceEditor(host, { onChange, onTime, onInvalid } = {}) 
   listen(form, 'input', () => handleEdit(false));
   listen(form, 'change', () => handleEdit(true));
   host.querySelectorAll('[data-gate]').forEach(input => listen(input, 'change', () => handleEdit(true)));
-  listen(get('[data-action=reset]'), 'click', () => { activePhase = 0; applyConfig(songSequence(), true); setTime(0); });
+  function restorePreset() {
+    activePhase = 0;
+    applyConfig(activePreset.config, true);
+    setTime(0);
+  }
+  listen(presetSelect, 'change', () => {
+    activePreset = SEQUENCE_PRESETS.find(preset => preset.id === presetSelect.value) ?? importedPreset;
+    onPreset?.(activePreset.id);
+    restorePreset();
+  });
+  listen(get('[data-action=reset]'), 'click', restorePreset);
   listen(get('.seq-scale select'), 'change', event => {
     pause(); scale = event.target.value; drawTraces(); setTime(timeMS);
   });
@@ -326,7 +341,20 @@ export function mountSequenceEditor(host, { onChange, onTime, onInvalid } = {}) 
   return {
     setTime, pause, setImagingGate,
     setEnabled(value) { enabled = Boolean(value); if (!enabled) pause(); applyAvailability(); },
-    replace(config) { applyConfig(config, true); },
+    replace(config, {presetId, name = '导入时序'} = {}) {
+      activePreset = SEQUENCE_PRESETS.find(preset => preset.id === presetId) ?? matchingSequencePreset(config);
+      presetSelect.querySelector('option[value="imported"]')?.remove();
+      importedPreset = null;
+      if (!activePreset) {
+        importedPreset = {id:'imported', name, config:{...config}};
+        activePreset = importedPreset;
+        presetSelect.add(new Option(name, activePreset.id));
+      }
+      presetSelect.value = activePreset.id;
+      onPreset?.(activePreset.id);
+      applyConfig(config, true);
+    },
+    getPreset() { return activePreset; },
     getConfig() { return { ...program.config }; },
     destroy() { pause(); events.abort(); host.replaceChildren(); },
   };

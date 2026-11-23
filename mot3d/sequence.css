@@ -1,6 +1,10 @@
 .seq-editor { --seq-cursor:0%; min-width:0; background:var(--panel); border:1px solid var(--line); border-radius:10px; overflow:hidden; }
 .seq-title,.seq-chart-head,.seq-form-head,.seq-reference { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px 16px; }
 .seq-title { padding:18px 20px 14px; }
+.seq-presets,.seq-presets label { display:flex; align-items:center; flex-wrap:wrap; gap:6px 10px; max-width:100%; min-width:0; }
+.seq-presets label,.seq-presets select { font:var(--meta)/1.5 var(--sans); }
+.seq-presets label { color:var(--muted); }
+.seq-presets select { min-width:0; max-width:100%; }
 .seq-title h2,.seq-form-head h3 { margin:0; color:var(--text); font:600 var(--body)/1.4 var(--sans); }
 .seq-title p,.seq-note,.seq-error { font:var(--meta)/1.65 var(--sans); color:var(--muted); margin:4px 0 0; }
 .seq-chart-head { padding:0 20px 14px; }
