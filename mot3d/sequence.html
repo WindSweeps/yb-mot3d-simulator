@@ -95,10 +95,16 @@
       </form>
       <p class="sequence-note" id="sequence-geometry"></p>
     </details>
+    <details class="sequence-method"><summary>光与原子能级的相互作用</summary>
+      <p id="sequence-light-force">模拟逐步计算每个 ¹⁷⁴Yb 原子受到的平均辐射压力。399 nm 蓝光驱动 ¹S₀ → ¹P₁，556 nm 绿光驱动 ¹S₀ → ³P₁。两条跃迁共享同一个基态。每个激发态都有 <i>m′</i> = −1、0、+1 三个磁子能级，分别与相对于局部磁场方向的 σ⁻、π、σ⁺ 偏振分量耦合。<a href="https://arxiv.org/html/2503.24383v2#S4" target="_blank" rel="noopener">Li 等，双色 MOT 的能级与布居 ↗</a></p>
+      <p>每束光对每条跃迁分量的有效失谐为 Δ<sub>eff</sub> = Δ − <b>k</b>·<b>v</b> − <i>m′g′</i>μ<sub>B</sub>|<b>B</b>|/ℏ，各项均用角频率。运动产生多普勒频移，局部磁场使三个磁子能级发生不同的塞曼频移。结合原子所在位置的高斯光强、偏振权重和饱和效应，模型算出每束光的散射率，并按共享基态的布居修正两种颜色的散射率。</p>
+      <p>第 <i>j</i> 束光的每次吸收向原子传递动量 ℏ<b>k</b><sub>j</sub>。各束贡献相加得到平均光力 <b>F</b> = ∑<sub>j</sub> ℏ<b>k</b><sub>j</sub><i>R</i><sub>j</sub>，其中 <i>R</i><sub>j</sub> 为该束光在当前时刻的散射率。相向光束的散射率之差决定原子受到的恢复力与速度阻尼。轨迹积分另计重力。启用随机反冲时，蓝光用动量扩散近似，绿光逐个抽样吸收和自发辐射事件。</p>
+      <p>这个准稳态散射率模型省略了能级之间的相干演化、保守光偶极梯度力和原子之间的散射光再吸收。</p>
+    </details>
     <details class="sequence-method"><summary>论文参数、时序假设与模型</summary>
       <p>各通道共享一条以毫秒计的时间轴。同一时间戳上的光强、频率和梯度同时生效。浏览器只在本机模拟这组事件。<a href="https://m-labs.hk/artiq/manual/rtio.html#timeline-and-output-events" target="_blank" rel="noopener">ARTIQ 时间轴与输出事件 ↗</a></p>
       <p>宋博组在双色装载时将 556 nm 设为蓝失谐。交接开始时，绿光跳至红失谐，399 nm 在 1 ms 内关闭。压缩时改变绿光失谐、降低功率并提高梯度。网页把论文的两对强光分配给 V1、V2，一对弱光分配给沿 Y 轴的 H。<a href="https://arxiv.org/pdf/2503.24383v2#page=3" target="_blank" rel="noopener">Li 等，第 V 节 ↗</a></p>
-      <p>arXiv:2503.24383v2 预设取纯绿接收 10 ms，弱光每束按初始功率比例降至 14.9 µW。AI 优化预设以压缩结束时的六维高斯等效峰值相空间密度为优化目标。两色共用基态，光力随各束高斯光强、多普勒频移、Zeeman 频移与偏振变化。积分包括重力与可选的随机光子反冲。</p>
+      <p>arXiv:2503.24383v2 预设取纯绿接收 10 ms，弱光每束按初始功率比例降至 14.9 µW。AI 优化预设以压缩结束时的六维高斯等效峰值相空间密度为优化目标。</p>
       <p>装载阶段用最初 20 ms 的轨迹估计捕获概率，并用速率方程计算整个装载时段的原子数。交接和压缩逐步积分同一批留存原子。温度由扣除云团平均速度后的三维速度方差计算，RMS 半径由相对云心的三维位移计算。</p>
       <p>WebGPU 并行积分各条轨迹，三维视图显示采样位置和相对荧光亮度，相机用每条阱内轨迹代表的原子数计算信号。提高轨迹数可降低捕获比例和云团分布的抽样波动。绝对原子数取决于入射通量、捕获率和损失系数。宋博组报告的压缩末态约为 10⁸ 个原子，转移和压缩合计损失约 10%。<a href="https://arxiv.org/html/2503.24383v2#S5" target="_blank" rel="noopener">Li 等，第 V 节 ↗</a></p>
       <p>成像视场以曝光结束时的磁场中心为原点。荧光使用阱内样本在曝光窗内的散射率，合并两种波长时采用相同的探测效率。弱探针吸收按柱密度计算透射光，再经过成像系统模糊并扣除暗场，得到光学厚度。图像给出相机的期望信号，未加入随机读出噪声、多重散射或探针反冲。<a href="https://arxiv.org/pdf/1509.03233#page=9" target="_blank" rel="noopener">Yamamoto 等，Yb 荧光探测效率 ↗</a> · <a href="https://arxiv.org/pdf/0707.2930#page=2" target="_blank" rel="noopener">Reinaudi 等，三帧吸收成像 ↗</a></p>
