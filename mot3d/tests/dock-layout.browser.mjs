@@ -19,7 +19,7 @@ await page.addInitScript(()=>{
   window.dockTestErrors=[];
   window.addEventListener('error',event=>window.dockTestErrors.push(event.message));
 });
-const labels = { timeline:'通道时序', scene:'三维 MOT', imaging:'相机成像', readings:'原子样本', curves:'原子数与 PSD' };
+const labels = { timeline:'通道时序', scene:'三维 MOT', imaging:'相机成像', readings:'原子样本', curves:'原子数与 PSD', optimizer:'梯度优化' };
 const entries = new Map(Object.entries(labels).map(([id,text])=>[text,id]));
 const keyPrefix = 'yb-mot3d-sequence-layout-v1-';
 const find = selector => page.locator(selector);
@@ -186,6 +186,7 @@ try {
   assert.ok(groupOf(standard,'scene').x>groupOf(standard,'timeline').x);
   assert.ok(groupOf(standard,'imaging').y>groupOf(standard,'scene').y);
   assert.deepEqual(groupOf(standard,'imaging').tabs,['imaging','readings','curves']);
+  assert.deepEqual(groupOf(standard,'timeline').tabs,['timeline','optimizer']);
   assert.equal(groupOf(standard,'imaging').active,'imaging');
   await checkTimelineDrag();
   await resizeSeparator('horizontal',-210,-90);

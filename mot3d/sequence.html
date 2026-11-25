@@ -43,6 +43,31 @@
     <div id="sequence-dock" role="region" aria-label="实验面板工作区"></div>
     <div id="sequence-panel-source" hidden>
     <section id="sequence-editor" aria-label="通道时序"></section>
+      <section id="sequence-optimizer" aria-label="梯度优化">
+        <form id="seq-opt-form">
+          <fieldset class="seq-opt-settings">
+            <legend class="sr-only">梯度优化设置</legend>
+            <div class="seq-opt-grid">
+              <label>目标变量<select name="objective"><option value="psd">峰值 PSD</option><option value="atoms">阱内原子数</option><option value="temperatureUK">动能温度 / µK</option><option value="rmsRadiusMM">云团 RMS 半径 / mm</option></select></label>
+              <label>优化方向<select name="direction"><option value="max">最大化</option><option value="min">最小化</option></select></label>
+              <label>目标时刻 / ms<input type="number" name="timeMS" step="any" min="0" required></label>
+              <button type="button" class="small-button" data-opt="cursor">使用游标时刻</button>
+            </div>
+            <p class="sequence-note">各候选时序在同一目标时刻评估。装载等待期间沿用捕获云快照。</p>
+            <details class="seq-opt-variables">
+              <summary>操作变量 <span data-opt="selection"></span></summary>
+              <div class="seq-opt-checks"></div>
+            </details>
+            <label class="seq-opt-budget">最多试算次数<input type="number" name="maxEvaluations" min="2" step="1" value="32" required></label>
+          </fieldset>
+          <div class="seq-opt-actions"><button type="submit" class="small-button" data-opt="start" disabled>开始优化</button><button type="button" class="small-button" data-opt="stop" disabled>停止优化</button><button type="button" class="small-button" data-opt="apply" disabled>应用最佳时序</button></div>
+        </form>
+        <p class="seq-opt-status" role="status" data-opt="status"></p>
+        <div class="seq-opt-results" hidden>
+          <div class="seq-opt-scores"><span>初始值 <output data-opt="initial"></output></span><span>最佳值 <output data-opt="best"></output></span></div>
+          <dl class="seq-opt-params"></dl>
+        </div>
+      </section>
       <div class="scene-card" id="sequence-scene">
         <div class="sequence-scene-head"><div><h2>三维 MOT</h2><p id="sequence-stage-text">双色装载</p><p id="seq-scene-population"></p></div>
           <div class="sequence-views" aria-label="三维视角"><button type="button" class="small-button" data-seq-view="iso" aria-pressed="true">全景</button><button type="button" class="small-button" data-seq-view="xz" aria-pressed="false">XZ</button><button type="button" class="small-button" data-seq-view="cloud" aria-pressed="false" title="围绕磁场零点旋转和缩放。梯度为零时使用线圈几何中心。">云团放大</button></div></div>

@@ -8,6 +8,7 @@ import { fluorescenceExposure, sequenceFrameAt } from './sequence-exposure.js';
 import { mountImagingPanel, validateImagingSettings } from './sequence-imaging-view.js';
 import { mountSequenceDock } from './sequence-dock.js';
 import { mountSequenceCurves } from './sequence-curves.js';
+import { mountSequenceOptimization } from './sequence-optimization.js';
 
 // 时序与求解器持续更新同一组控件，停靠过程可以移动它们的父节点。
 const elements = new Map(Array.from(document.querySelectorAll('[id]'), el => ['#' + el.id, el]));
@@ -35,6 +36,7 @@ let geometry = derive(params);
 let loading = { flux:params.incidentFlux ?? DEFAULT_FLUX };
 let worker = null, timer = 0, job = 0, result = null, scene = null, population = null;
 let editValid = true, suspended = false, started = 0;
+let observeAtMS;
 
 async function initialInputs() {
   let previous;
@@ -116,6 +118,7 @@ function summarize() {
   population = result && loadingForm.checkValidity()
     ? sequencePopulation(program, result, loading) : null;
   refreshCurves();
+  optimization.setContext(program, Boolean(result && population && editValid && form.checkValidity()));
   const atoms = population?.estimatedAtoms;
   for (const key of ['N0','N1','N2']) {
     const suffix = key.toLowerCase();
@@ -186,6 +189,7 @@ const curves = mountSequenceCurves($('#sequence-curves'), t => { editor.pause();
 const editor = mountSequenceEditor($('#sequence-editor'), {
   initialPreset,
   onPreset(id) {
+    observeAtMS = undefined;
     const url = new URL(location.href);
     if (id === 'imported') url.searchParams.delete('preset');
     else url.searchParams.set('preset', id);
@@ -196,12 +200,23 @@ const editor = mountSequenceEditor($('#sequence-editor'), {
   onChange(config, compiled) {
     editValid = true;
     program = compiled;
+    if (observeAtMS > program.durationMS) observeAtMS = undefined;
     if (!suspended) recalculate();
   },
   onInvalid(message) {
     editValid = false;
     cancelRun();
     status(message);
+  },
+});
+
+const optimization = mountSequenceOptimization($('#sequence-optimizer'), {
+  getCursor:() => timeMS,
+  getInputs:() => ({config:editor.getConfig(), params:{...params}, loading:{...loading}, shader:computeShader}),
+  apply(config, targetMS) {
+    editor.replace(config, {name:'梯度优化时序'});
+    observeAtMS = targetMS;
+    editor.setTime(targetMS);
   },
 });
 
@@ -221,6 +236,7 @@ function status(message, retry = false) {
 }
 
 function cancelRun() {
+  optimization.invalidate();
   job++;
   clearTimeout(timer);
   worker?.terminate();
@@ -273,7 +289,7 @@ function recalculate() {
       status('计算完成 · ' + result.backend + ' · ' + result.n.toLocaleString('zh-CN') + ' 条入射轨迹 · ' +
         ((performance.now() - started) / 1000).toFixed(2) + ' s');
     };
-    worker.postMessage({id, params, config:program.config, shader:computeShader});
+    worker.postMessage({id, params, config:program.config, shader:computeShader, observeAtMS});
   }, 140);
 }
 
@@ -297,6 +313,7 @@ $('#sequence-export').addEventListener('click', () => {
   const preset = editor.getPreset();
   const file = { format:formatId, presetId:preset.id, presetName:preset.name, config:editor.getConfig(),
     params, loading, imaging:imaging.getSettings(), summary:result?.summary ?? null };
+  if (observeAtMS !== undefined) file.observeAtMS = observeAtMS;
   if (result) file.samplingDiagnostics = result.samplingDiagnostics;
   if (population) {
     file.estimatedAtoms = population.estimatedAtoms;
@@ -315,6 +332,9 @@ $('#sequence-file').addEventListener('change', async event => {
     const data = JSON.parse(await file.text());
     if (data.format !== formatId || !data.params) throw new Error('请选择本工作台导出的时序 JSON。');
     const compiled = compileSequence(data.config);
+    if (data.observeAtMS !== undefined && (!Number.isFinite(data.observeAtMS) ||
+        data.observeAtMS < 0 || data.observeAtMS > compiled.durationMS))
+      throw new Error('目标观察时刻超出导入时序范围。');
     const inputParams = { ...data.params };
     delete inputParams._mot3dCompiled;
     const imported = compile(inputParams).params;
@@ -341,6 +361,7 @@ $('#sequence-file').addEventListener('change', async event => {
       presetId:data.presetId, name:typeof data.presetName === 'string' && data.presetName.trim()
         ? data.presetName : file.name.replace(/\.json$/i, ''),
     });
+    observeAtMS = data.observeAtMS;
     $('#sequence-file-status').textContent = '已载入 ' + file.name;
   } catch (e) {
     $('#sequence-file-status').textContent = '导入未完成 · ' + e.message;
@@ -362,6 +383,7 @@ for (const button of document.querySelectorAll('[data-checkpoint]')) button.addE
 });
 form.addEventListener('submit', event => event.preventDefault());
 loadingForm.addEventListener('input', () => {
+  optimization.invalidate();
   if (loadingForm.checkValidity()) {
     loading = Object.fromEntries(loadingFields.filter(field => field.value !== '').map(field => [field.name, field.valueAsNumber]));
   }
@@ -375,7 +397,7 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) edito
 window.addEventListener('pagehide', e => {
   editor.pause();
   if (e.persisted) return;
-  clearTimeout(timer); worker?.terminate(); curves.destroy(); imaging.destroy(); editor.destroy(); scene?.destroy();
+  clearTimeout(timer); worker?.terminate(); optimization.destroy(); curves.destroy(); imaging.destroy(); editor.destroy(); scene?.destroy();
 });
 mountSequenceDock();
 fillInputs();

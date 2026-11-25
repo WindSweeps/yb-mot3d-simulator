@@ -1,7 +1,7 @@
 import { simulateSequence } from './sequence-physics.js';
 import { createSequenceGpu, SequenceDeviceUnavailable } from './sequence-gpu.js';
 
-self.onmessage = async ({ data: {id, params, config, shader} }) => {
+self.onmessage = async ({ data: {id, params, config, shader, observeAtMS} }) => {
   let engine, result, reason = '', backend = 'WebGPU', lastProgress = -Infinity;
   function report(progress) {
     if (progress>0 && progress<1 && performance.now()-lastProgress<160) return;
@@ -14,7 +14,7 @@ self.onmessage = async ({ data: {id, params, config, shader} }) => {
         engine = await createSequenceGpu(shader);
         if (engine) {
           report(0);
-          result = await engine.run(params,config,{onProgress:report});
+          result = await engine.run(params,config,{onProgress:report, observeAtMS});
         }
       } catch (error) {
         if (!(error instanceof SequenceDeviceUnavailable)) throw error;
@@ -25,7 +25,7 @@ self.onmessage = async ({ data: {id, params, config, shader} }) => {
       backend = 'CPU';
       reason ||= shader ? '当前浏览器没有可用的 WebGPU 设备。' : '此请求使用 CPU 积分。';
       report(0);
-      result = simulateSequence(params,config,{onProgress:report});
+      result = simulateSequence(params,config,{onProgress:report, observeAtMS});
       result.backend = backend;
     }
     const transfer = ['timesMS','positionsM','alive','trapped','blueRates','greenRates'].map(key => result[key].buffer);

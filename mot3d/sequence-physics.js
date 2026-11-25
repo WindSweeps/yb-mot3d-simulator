@@ -128,16 +128,30 @@ export function prepareSequenceRun(input, config, options = {}) {
   const model = compile(input), field = lightField(model);
   const { n } = model.params;
   const program = compileSequence(config), { grid, loadEnd } = observationGrid(program);
+  const observeAtMS = options.observeAtMS;
+  if (observeAtMS != null) {
+    if (!Number.isFinite(observeAtMS) || observeAtMS < 0 || observeAtMS > program.durationMS)
+      throw new RangeError('附加观察时刻须位于当前时序内。');
+    // 等待装载的时段沿用捕获云快照。积分时段在指定时刻精确落步，保留原区间的驻留判据。
+    if (observeAtMS < loadEnd || observeAtMS > program.stages[0].endMS) {
+      const next = grid.findIndex(point => point.time >= observeAtMS);
+      if (grid[next].time !== observeAtMS)
+        grid.splice(next, 0, {time:observeAtMS, windowStart:grid[next].windowStart});
+    }
+  }
   const initial = options.initialStates ? Float64Array.from(options.initialStates) : sampleInitialStates(model.params);
   if (initial.length !== n*6 || initial.some(x => !Number.isFinite(x))) throw new RangeError('时序初始相空间尺寸或数值无效。');
   const samples = n * grid.length;
   const result = {
     n, frameCount:grid.length, stages:program.stages, loadWindowMS:loadEnd,
     timesMS:Float64Array.from(grid, point => point.time),
-    positionsM:new Float32Array(samples * 3), alive:new Uint8Array(samples), trapped:new Uint8Array(samples),
-    blueRates:new Float32Array(samples), greenRates:new Float32Array(samples),
     metrics:[], summary:{N0:0, N1:0, N2:0},
   };
+  // 优化器只消费各帧统计量，普通时序同时保留回放和成像的逐原子记录。
+  if (!options.metricsOnly) Object.assign(result, {
+    positionsM:new Float32Array(samples * 3), alive:new Uint8Array(samples), trapped:new Uint8Array(samples),
+    blueRates:new Float32Array(samples), greenRates:new Float32Array(samples),
+  });
   return {model, field, program, grid, loadEnd, initial, result};
 }
 
@@ -146,16 +160,20 @@ function frameMoments() {
 }
 
 function writeAtom(result, k, pos, offsetP, vel, offsetV, live, trapped, blueRate, greenRate, m) {
-  result.positionsM[3*k] = pos[offsetP];
-  result.positionsM[3*k+1] = pos[offsetP+1];
-  result.positionsM[3*k+2] = pos[offsetP+2];
+  if (result.positionsM) {
+    result.positionsM[3*k] = pos[offsetP];
+    result.positionsM[3*k+1] = pos[offsetP+1];
+    result.positionsM[3*k+2] = pos[offsetP+2];
+    if (live) {
+      result.alive[k] = 1;
+      result.blueRates[k] = blueRate;
+      result.greenRates[k] = greenRate;
+      result.trapped[k] = Number(trapped);
+    }
+  }
   if (!live) return;
   m.live++;
-  result.alive[k] = 1;
-  result.blueRates[k] = blueRate;
-  result.greenRates[k] = greenRate;
   if (!trapped) return;
-  result.trapped[k] = 1;
   const count = ++m.count;
   for (let axis = 0; axis < 3; axis++) {
     m.delta[axis] = pos[offsetP + axis] - m.mean[axis];
