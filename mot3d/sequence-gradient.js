@@ -104,12 +104,20 @@ export async function optimizeSequence({
     const gradient = [];
     for (let i = 0; i < axes.length && !finished(); i++) {
       const {key, min, max} = axes[i];
-      const left = displaced(i, -radius/4), right = displaced(i, radius/4);
-      const a = left === base[key] ? baseValue : await sample(projectTime({...base, [key]:left}));
-      const b = right === base[key] ? baseValue : await sample(projectTime({...base, [key]:right}));
-      const span = (b === null ? base[key] : right) - (a === null ? base[key] : left);
+      async function neighbor(step) {
+        const request = displaced(i, step);
+        const candidate = projectTime({...base, [key]:request});
+        if (axes.every(axis => candidate[axis.key] === base[axis.key])) return [base[key], baseValue];
+        const value = await sample(candidate);
+        if (value === null) return [base[key], baseValue];
+        // 单变量可行步用实际位移求导；多阶段共同移动时沿投影路径的原始方向求导。
+        const coupled = durationAxes.some(axis => axis.key !== key && candidate[axis.key] !== base[axis.key]);
+        return [coupled ? request : candidate[key], value];
+      }
+      const [left, a] = await neighbor(-radius/4), [right, b] = await neighbor(radius/4);
+      const span = right - left;
       // 缺少一侧有效读数时使用单侧导数，两侧均无数据时保留原值。
-      let slope = span > 0 ? sign * ((b ?? baseValue) - (a ?? baseValue)) / (span / scales[i]) : 0;
+      let slope = span > 0 ? sign * (b - a) / (span / scales[i]) : 0;
       if ((base[key] === min && slope < 0) || (base[key] === max && slope > 0)) slope = 0;
       gradient.push(slope);
     }
