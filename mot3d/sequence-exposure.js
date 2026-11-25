@@ -9,8 +9,10 @@ export function sequenceFrameAt(timesMS, timeMS) {
   return lo;
 }
 
-function cloudSamples(result, first, last, centerMM) {
-  const start = first * result.n, end = (last + 1) * result.n;
+export function cloudSamples(result, first, last, centerMM) {
+  const start = (first - (result.firstRecordedFrame ?? 0)) * result.n;
+  const end = start + (last - first + 1) * result.n;
+  if (start < 0 || end > result.trapped.length) throw new RangeError('成像需要曝光窗内的全部轨迹帧。');
   return {
     centerMM,
     positionsM: result.positionsM.subarray(3 * start, 3 * end),

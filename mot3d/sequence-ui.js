@@ -364,7 +364,8 @@ export function mountSequenceEditor(host, { initialPreset = SEQUENCE_PRESETS[0],
     setTime, pause, setImagingGate,
     setEnabled(value) { enabled = Boolean(value); if (!enabled) pause(); applyAvailability(); },
     replace(config, {presetId, name = '导入时序'} = {}) {
-      activePreset = SEQUENCE_PRESETS.find(preset => preset.id === presetId && preset.config.mode === config.mode) ?? matchingSequencePreset(config);
+      activePreset = presetId === 'imported' ? null :
+        SEQUENCE_PRESETS.find(preset => preset.id === presetId && preset.config.mode === config.mode) ?? matchingSequencePreset(config);
       presetSelect.querySelector('option[value="imported"]')?.remove();
       importedPreset = null;
       if (!activePreset) {

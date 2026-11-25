@@ -1,11 +1,12 @@
-import { DEFAULTS, compile, derive, magneticCenterMM } from './physics.js';
-import { compileSequence, sequenceAt, SEQUENCE_PRESETS } from './sequence.js';
+import { DEFAULTS, compile, derive } from './physics.js';
+import { compileSequence, SEQUENCE_PRESETS } from './sequence.js';
 import { mountSequenceEditor } from './sequence-ui.js';
 import { mountScene } from './render.js';
 import { DEFAULT_FLUX } from './fluorescence.js';
 import { sequenceLossStages, sequencePopulation } from './sequence-population.js';
-import { fluorescenceExposure, sequenceFrameAt } from './sequence-exposure.js';
+import { cloudReadout, sequenceObservation } from './sequence-observation.js';
 import { mountImagingPanel, validateImagingSettings } from './sequence-imaging-view.js';
+import { IMAGING_DEFAULTS } from './sequence-imaging.js';
 import { mountSequenceDock } from './sequence-dock.js';
 import { mountSequenceCurves } from './sequence-curves.js';
 import { mountSequenceOptimization } from './sequence-optimization.js';
@@ -39,6 +40,7 @@ const loadingByMode = new Map();
 let worker = null, timer = 0, job = 0, result = null, scene = null, population = null;
 let editValid = true, suspended = false, started = 0;
 let observeAtMS, importedObserveAtMS;
+let cameraSettings = IMAGING_DEFAULTS;
 
 async function initialInputs() {
   let previous;
@@ -90,10 +92,6 @@ function showReferenceLoss() {
   form.elements.greenWaistMM.closest('label').hidden = blueOnly;
 }
 
-function stageAt(t) {
-  return sequenceAt(program, t);
-}
-
 function numberOrBlank(x, digits) {
   return Number.isFinite(x) ? x.toLocaleString('zh-CN', { maximumFractionDigits:digits }) : blank;
 }
@@ -111,22 +109,15 @@ function showAtoms(output, count) {
   }
 }
 
-function curvePoint(timeMS, frame = sequenceFrameAt(result.timesMS, timeMS)) {
-  const metric = result.metrics[frame];
-  const atoms = population.at(timeMS, metric.count);
-  const psd = metric.psdPerAtom === null ? null : atoms * metric.psdPerAtom;
-  return {timeMS, atoms, psd};
-}
-
 function refreshCurves() {
   const points = [];
   if (population) {
     for (const [frame, time] of result.timesMS.entries()) {
-      points.push(curvePoint(time, frame));
+      points.push(cloudReadout(program, result, population, time, frame));
       // 装载等待期复用捕获云快照，原子数继续按非线性装载方程增长。
       const end = program.stages[0].endMS;
       if (time === result.loadWindowMS && end > time) {
-        for (let i = 1; i < 160; i++) points.push(curvePoint(time + (end - time) * (i / 160) ** 2, frame));
+        for (let i = 1; i < 160; i++) points.push(cloudReadout(program, result, population, time + (end - time) * (i / 160) ** 2, frame));
       }
     }
   }
@@ -138,7 +129,7 @@ function summarize() {
   population = result && loadingForm.checkValidity()
     ? sequencePopulation(program, result, loading) : null;
   refreshCurves();
-  optimization.setContext(program, Boolean(result && population && editValid && form.checkValidity()));
+  refreshOptimization();
   const atoms = population?.estimatedAtoms;
   for (const key of ['N0','N1','N2']) {
     const suffix = key.toLowerCase();
@@ -151,17 +142,20 @@ function summarize() {
   $('#seq-transfer').textContent = efficiency(atoms?.N2, atoms?.N0);
 }
 
+function refreshOptimization() {
+  optimization.setContext(program, Boolean(result && population && editValid && form.checkValidity() && imaging.isValid()));
+}
+
 function showFrame(t) {
   timeMS = Math.max(0, Math.min(program.durationMS, t));
-  const channels = stageAt(timeMS);
-  $('#sequence-stage-text').textContent = program.stages[channels.stageIndex].label +
+  const point = sequenceObservation({config:program.config, params, loading, imaging:cameraSettings},
+    program, result, timeMS, {population, geometry});
+  const {channels, frame:f, cloud:metric, atoms:count, psd} = point;
+  $('#sequence-stage-text').textContent = point.stage.label +
     ' · ' + numberOrBlank(timeMS, 2) + ' ms';
-  let metric, f;
   const sample = { ...channels, greenWaistMM:params.greenWaistMM, incidentFlux:loading.flux, positionsM:null };
   if (result) {
-    f = sequenceFrameAt(result.timesMS, timeMS);
     const start = f * result.n, end = start + result.n;
-    metric = result.metrics[f];
     Object.assign(sample, {
       positionsM:result.positionsM.subarray(3 * start, 3 * end),
       alive:result.alive.subarray(start, end), blueRates:result.blueRates.subarray(start, end),
@@ -174,35 +168,18 @@ function showFrame(t) {
     }
   }
   scene?.setSequenceFrame({ ...sample, loadingSource: result });
-  showImaging(sample, f);
+  imaging.setFrame(point.cameraFrame());
   $('#seq-count').textContent = metric?.count ?? blank;
   $('#seq-temperature').textContent = numberOrBlank(metric?.temperatureUK, 1);
   $('#seq-radius').textContent = numberOrBlank(metric?.rmsRadiusMM, 3);
-  const point = population && curvePoint(timeMS, f);
-  const count = point?.atoms;
-  curves.setCursor(timeMS, count ?? null, point?.psd ?? null);
+  curves.setCursor(timeMS, count, psd);
   showAtoms($('#seq-population'), count);
   $('#seq-scene-population').textContent = Number.isFinite(count) ? '估计阱内 ' + scientificCount(count) + ' 个原子' : '';
   const windowMS = Math.min(20, program.stages[0].durationMS);
-  const onPlateau = channels.stageId === 'load' && timeMS > windowMS;
+  const onPlateau = timeMS <= program.stages[0].endMS && timeMS > windowMS;
   $('#seq-window-note').textContent = onPlateau
     ? '装载等待段使用 ' + windowMS + ' ms 的捕获云快照。轨迹图层用入射样本示意连续装载，亮纹沿飞行方向移动。'
     : '入射样本 ' + params.n + ' 个，装载轨迹积分 ' + windowMS + ' ms。当前读数取 r < 3 mm、速率 < 1 m/s 的样本，阶段末留存还要求在末段持续满足两项条件。';
-}
-
-function showImaging(sceneSample, f) {
-  const endMS = timeMS, stage = program.stages[sceneSample.stageIndex];
-  const centerMM = magneticCenterMM(sceneSample.gradientGCM, geometry.mainTensor, geometry.biasG) ?? [0, 0, 0];
-  const context = { timeMS:endMS, sampledAtMS:endMS, stageLabel:stage.label, sample:{positionsM:null, centerMM} };
-  if (result && population) {
-    const trajectory = result, estimate = population;
-    const weightAt = (frame, t) => estimate.weightAt(t, trajectory.metrics[frame].count);
-    context.sampledAtMS = trajectory.timesMS[f];
-    context.weight = weightAt(f, endMS);
-    context.sample = { ...sceneSample, centerMM, weight:context.weight, alive:trajectory.trapped.subarray(f * trajectory.n, (f + 1) * trajectory.n) };
-    context.fluorescenceSample = exposureUS => fluorescenceExposure(trajectory, endMS, exposureUS, centerMM, weightAt);
-  }
-  imaging.setFrame(context);
 }
 
 const curves = mountSequenceCurves($('#sequence-curves'), t => { editor.pause(); editor.setTime(t); });
@@ -216,7 +193,10 @@ const editor = mountSequenceEditor($('#sequence-editor'), {
     history.replaceState(history.state, '', url);
     $('#sequence-file-status').textContent = '';
   },
-  onTime:showFrame,
+  onTime(t) {
+    if (suspended) timeMS = t;
+    else showFrame(t);
+  },
   onChange(config, compiled) {
     editValid = true;
     if (!suspended && program.config.mode !== compiled.config.mode) {
@@ -237,25 +217,57 @@ const editor = mountSequenceEditor($('#sequence-editor'), {
 
 const optimization = mountSequenceOptimization($('#sequence-optimizer'), {
   getCursor:() => timeMS,
-  getInputs:() => ({config:editor.getConfig(), params:{...params}, loading:{...loading}, shader:computeShader}),
-  apply(config, targetMS) {
-    optimization.setTargetTime(targetMS);
-    importedObserveAtMS = targetMS;
-    editor.replace(config, {name:'梯度优化时序'});
-    observeAtMS = targetMS;
-    editor.setTime(targetMS);
+  shader:computeShader,
+  getExperiment:() => ({config:program.config, params, loading, imaging:imaging.getSettings()}),
+  apply(experiment, targetMS) {
+    const view = imaging.getSettings();
+    const best = {...experiment, imaging:{...experiment.imaging, displayGain:view.displayGain,
+      fluorescenceStage:view.fluorescenceStage, absorptionStage:view.absorptionStage}};
+    loadExperiment(best, {presetId:'imported', name:'梯度优化时序'}, targetMS);
   },
 });
 
 const imaging = mountImagingPanel($('#sequence-imaging'), {
-  onSettingsChange: settings => editor.setImagingGate(settings),
+  onSettingsChange(settings) {
+    editor.setImagingGate(settings);
+    const changed = Object.keys(IMAGING_DEFAULTS).some(key => settings[key] !== cameraSettings[key]);
+    cameraSettings = settings;
+    if (changed && !suspended) {
+      optimization.invalidate();
+      refreshOptimization();
+    }
+  },
   onReplayStart: () => editor.pause(),
   onShowFinal: () => { editor.pause(); editor.setTime(program.durationMS); },
   onValidityChange: valid => {
     $('#sequence-export').disabled = !valid || !editValid || !form.checkValidity() || !loadingForm.checkValidity();
+    if (!suspended) {
+      if (!valid) optimization.invalidate();
+      refreshOptimization();
+    }
   },
 });
 editor.setImagingGate(imaging.getSettings());
+
+// 导入和应用最佳结果都要同时更换装置、损失和成像设置，然后只提交一次计算。
+function loadExperiment(experiment, preset, targetMS) {
+  suspended = true;
+  try {
+    loadingByMode.set(program.config.mode, loading);
+    params = structuredClone(experiment.params);
+    loading = {...experiment.loading};
+    fillInputs();
+    imaging.setSettings(experiment.imaging);
+    importedObserveAtMS = targetMS;
+    editor.replace(experiment.config, preset);
+    observeAtMS = targetMS;
+    if (targetMS !== undefined) {
+      editor.setTime(targetMS);
+      optimization.setTargetTime(targetMS);
+    }
+  } finally { suspended = false; }
+  recalculate();
+}
 
 function status(message, retry = false) {
   $('#sequence-compute-status').textContent = message;
@@ -382,27 +394,14 @@ $('#sequence-file').addEventListener('change', async event => {
       if (!Number.isFinite(v) || v < Number(field.min) || v > Number(field.max))
         throw new Error('通量或损失系数超出可编辑范围 · ' + field.name);
     }
-    const cameraSettings = validateImagingSettings(data.imaging);
-    suspended = true;
-    loadingByMode.set(program.config.mode, loading);
-    params = imported; loading = { ...importedLoading }; fillInputs();
-    imaging.setSettings(cameraSettings);
-    importedObserveAtMS = data.observeAtMS;
-    editor.replace(compiled.config, {
-      presetId:data.presetId, name:typeof data.presetName === 'string' && data.presetName.trim()
-        ? data.presetName : file.name.replace(/\.json$/i, ''),
-    });
-    observeAtMS = data.observeAtMS;
-    if (observeAtMS !== undefined) {
-      editor.setTime(observeAtMS);
-      optimization.setTargetTime(observeAtMS);
-    }
+    const name = typeof data.presetName === 'string' && data.presetName.trim() ? data.presetName : file.name.replace(/\.json$/i, '');
+    loadExperiment({config:compiled.config, params:imported, loading:importedLoading, imaging:validateImagingSettings(data.imaging)},
+      {presetId:data.presetId, name}, data.observeAtMS);
     $('#sequence-file-status').textContent = '已载入 ' + file.name;
   } catch (e) {
     $('#sequence-file-status').textContent = '导入未完成 · ' + e.message;
     return;
-  } finally { suspended = false; event.target.value = ''; }
-  recalculate();
+  } finally { event.target.value = ''; }
 });
 
 for (const button of document.querySelectorAll('[data-seq-view]')) button.addEventListener('click', () => {

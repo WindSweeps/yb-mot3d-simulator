@@ -1,4 +1,5 @@
-import { IMAGING_DEFAULTS, simulateImagingFrame, validateImagingSettings as validateModel } from './sequence-imaging.js';
+import { IMAGING_DEFAULTS, validateImagingSettings as validateModel } from './sequence-imaging.js';
+import { sequenceCameraImage } from './sequence-observation.js';
 
 const stages = {
   fluorescence: [
@@ -9,7 +10,7 @@ const stages = {
     ['atoms', '有原子帧', '光电子/像素', '399 nm 探针穿过原子云，在相机上形成吸收阴影。'],
     ['reference', '参考帧', '光电子/像素', '移除原子后，以相同探针强度和曝光时间计算参考图像。'],
     ['dark', '暗场帧', '光电子/像素', '关闭探针，记录相机的固定读出偏置。'],
-    ['od', '重建光学厚度', 'OD', '两张探针帧分别扣除暗场，得到透射率 T 和光学厚度 −ln T。最低可分辨透射信号取 1 个光电子/像素。'],
+    ['od', '重建光学厚度', 'OD', '两张探针帧分别扣除暗场，得到透射率 T 和光学厚度 −ln T。最低可分辨透射信号由探测下限决定。'],
   ],
 };
 const stageKey = mode => mode === 'absorption' ? 'absorptionStage' : 'fluorescenceStage';
@@ -24,6 +25,9 @@ const controls = [
   ['sampleSigmaUM','样本密度平滑 σ / µm',0,200],
   ['detectionEfficiency','荧光总探测效率',0,1],
   ['probeSaturation','探针强度 I / Iₛₐₜ',.001,.05],
+  ['probeEfficiency','吸收探针总探测效率',0,1],
+  ['darkElectrons','暗场偏置 / 光电子每像素',0,1e6],
+  ['minDetectableElectrons','探测下限 / 光电子每像素',.001,1e6],
   ['displayGain','显示增益',gains.map(g => [String(g),g + ' ×'])],
 ];
 const inputIds = { exposureUS:'exposure', fovMM:'fov', psfSigmaUM:'psf', sampleSigmaUM:'smoothing',
@@ -119,7 +123,7 @@ export function mountImagingPanel(host, { onSettingsChange, onValidityChange, on
     modeInput.value = mode; body.hidden = mode === 'off';
     for (const [key,field] of fields) {
       field.value = String(settings[key]);
-      const hidden = (key === 'probeSaturation' && mode !== 'absorption') ||
+      const hidden = (['probeSaturation','probeEfficiency','darkElectrons','minDetectableElectrons'].includes(key) && mode !== 'absorption') ||
         (['band','detectionEfficiency'].includes(key) && mode !== 'fluorescence');
       field.parentElement.hidden = field.disabled = hidden;
     }
@@ -129,7 +133,7 @@ export function mountImagingPanel(host, { onSettingsChange, onValidityChange, on
     const absorption = mode === 'absorption';
     el('.si-total-label').textContent = absorption ? '全视场探针衰减' : '全视场荧光信号';
     el('.si-assumptions').textContent = (absorption
-      ? '曝光按游标时刻冻结阱内原子，假设熄灭冷却光后以均匀的 399 nm 共振弱探针成像。三帧采用同一曝光，读出偏置取每像素 12 个光电子，透过率与量子效率乘积取 0.5。'
+      ? '曝光按游标时刻冻结阱内原子，假设熄灭冷却光后以均匀的 399 nm 共振弱探针成像。三帧采用相同的曝光和暗场偏置，探测效率包括光路透过率和量子效率。'
       : '在截至游标的曝光时间内，累加所选波段的逐原子散射光。总探测效率包括收集立体角、光路透过率和量子效率。') +
       ' 视场以曝光结束时的磁场零点为中心，梯度为零时使用线圈几何中心。计算相机信号时，每条阱内轨迹代表的原子数随当前阶段的单体与双体损失更新。图像显示期望信号。';
   }
@@ -210,18 +214,20 @@ export function mountImagingPanel(host, { onSettingsChange, onValidityChange, on
       el('.si-size').textContent = ''; return;
     }
     if (calculated !== version) {
-      const sample = mode === 'fluorescence' ? source.fluorescenceSample(settings.exposureUS) : source.sample;
-      image = simulateImagingFrame(sample, settings);
+      image = sequenceCameraImage(source, settings);
       calculated = version;
     }
     const peak = image.peaks[stage];
     writeGraphic(image.images[stage],max,nonlinear,raw || stage === 'signal' ? palettes.grey : palettes.heat);
     blank.textContent = nonlinear && peak === 0 ? (stage === 'emission' ? '视场内发射光子数为零' : '本次曝光未探测到荧光') : '';
+    if (stage === 'od' && peak === null) blank.textContent = '探针参考信号低于探测下限，无法重建光学厚度。';
     blank.hidden = !blank.textContent;
-    peakOutput.textContent = format(peak) + ' ' + unit; peakOutput.dataset.value = String(peak);
+    peakOutput.textContent = format(peak) + ' ' + unit;
+    if (peak !== null) peakOutput.dataset.value = String(peak);
+    else delete peakOutput.dataset.value;
     totalOutput.textContent = format(image.totalSignal) + ' 光电子'; totalOutput.dataset.value = String(image.totalSignal);
     el('.si-size').textContent = image.size + ' × ' + image.size + ' 像素 · ' + format(image.pixelSizeUM) + ' µm/像素' +
-      (stage === 'od' && image.clippedPixels ? ' · ' + image.clippedPixels + ' 个像素达到探测上限 OD ' + format(image.odLimit) : '');
+      (stage === 'od' && image.odLimit !== null && image.clippedPixels ? ' · ' + image.clippedPixels + ' 个像素达到探测上限 OD ' + format(image.odLimit) : '');
   }
 
   function setSettings(input) {

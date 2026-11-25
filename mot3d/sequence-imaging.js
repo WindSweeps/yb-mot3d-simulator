@@ -1,8 +1,6 @@
 import { CONSTANTS } from './physics.js';
 
 const SIZE = 128;
-const PROBE_EFFICIENCY = .5;
-const DARK_ELECTRONS = 12;
 const CROSS_SECTION = 3 * CONSTANTS.wavelength ** 2 / (2 * Math.PI);
 const PHOTON_ENERGY = CONSTANTS.h * CONSTANTS.c / CONSTANTS.wavelength;
 const SATURATION_INTENSITY = PHOTON_ENERGY * CONSTANTS.gamma / (2 * CROSS_SECTION);
@@ -11,6 +9,7 @@ const projections = { x: [1, 2], y: [0, 2], z: [0, 1] };
 export const IMAGING_DEFAULTS = Object.freeze({
   mode: 'fluorescence', axis: 'y', band: 'both', fovMM: 3, exposureUS: 20,
   psfSigmaUM: 30, sampleSigmaUM: 60, detectionEfficiency: .01, probeSaturation: .01,
+  probeEfficiency: .5, darkElectrons: 12, minDetectableElectrons: 1,
 });
 
 export function validateImagingSettings(input = {}) {
@@ -20,7 +19,8 @@ export function validateImagingSettings(input = {}) {
       !['399', '556', 'both'].includes(settings.band))
     throw new RangeError('成像模式、观察轴或荧光波段无效。');
   const ranges = { fovMM:[1,50], exposureUS:[1,1000], psfSigmaUM:[0,100], sampleSigmaUM:[0,200],
-    detectionEfficiency:[0,1], probeSaturation:[.001,.05] };
+    detectionEfficiency:[0,1], probeSaturation:[.001,.05], probeEfficiency:[0,1],
+    darkElectrons:[0,1e6], minDetectableElectrons:[.001,1e6] };
   for (const [key, [min, max]] of Object.entries(ranges)) {
     if (!Number.isFinite(settings[key]) || settings[key] < min || settings[key] > max)
       throw new RangeError('成像参数超出范围 · ' + key);
@@ -130,25 +130,26 @@ export function simulateImagingFrame(sample, input = {}) {
     images = { emission, signal };
   } else {
     const pixelArea = (pixelSizeUM * 1e-6) ** 2;
-    referenceSignal = PROBE_EFFICIENCY * s.probeSaturation * SATURATION_INTENSITY * pixelArea * exposureS / PHOTON_ENERGY;
-    odLimit = Math.log(referenceSignal);
+    referenceSignal = s.probeEfficiency * s.probeSaturation * SATURATION_INTENSITY * pixelArea * exposureS / PHOTON_ENERGY;
+    if (referenceSignal >= s.minDetectableElectrons) odLimit = Math.log(referenceSignal / s.minDetectableElectrons);
     // 平场归一时，对光强损失 1−T 卷积与对 T 卷积等价，且无原子时精确返回空白图像。
     for (let i = 0; i < object.length; i++) object[i] = -Math.expm1(-CROSS_SECTION * object[i] / pixelArea);
-    const loss = gaussianCrop(object, opticalWidth, psf), dark = new Float64Array(loss.length).fill(DARK_ELECTRONS);
-    const reference = new Float64Array(loss.length).fill(referenceSignal + DARK_ELECTRONS);
+    const loss = gaussianCrop(object, opticalWidth, psf), dark = new Float64Array(loss.length).fill(s.darkElectrons);
+    const reference = new Float64Array(loss.length).fill(referenceSignal + s.darkElectrons);
     const atoms = new Float64Array(loss.length), od = new Float64Array(loss.length);
     for (let i = 0; i < loss.length; i++) {
       const transmission = Math.max(0, 1 - loss[i]);
       atoms[i] = dark[i] + referenceSignal * transmission;
       const transmitted = atoms[i] - dark[i];
-      if (transmitted < 1) clippedPixels++;
-      od[i] = Math.log((reference[i] - dark[i]) / Math.max(1, transmitted));
+      if (transmitted < s.minDetectableElectrons) clippedPixels++;
+      if (odLimit !== null) od[i] = Math.log((reference[i] - dark[i]) / Math.max(s.minDetectableElectrons, transmitted));
       totalSignal += reference[i] - atoms[i];
     }
     images = { atoms, reference, dark, od };
   }
   const peaks = {};
   for (const [name, pixels] of Object.entries(images)) peaks[name] = pixels.reduce((a,b) => Math.max(a,b), 0);
+  if (!fluorescence && odLimit === null) peaks.od = null;
   return { size:SIZE, fovMM:s.fovMM, pixelSizeUM, horizontalAxis:'XYZ'[h], verticalAxis:'XYZ'[v],
     images, peaks, weightedAtoms, sampleCount, totalSignal, odLimit, clippedPixels, referenceSignal };
 }

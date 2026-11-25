@@ -24,6 +24,7 @@
     <div class="layout-toolbar">
       <p class="layout-hint">拖动面板标签到边缘可分屏，拖到中央可合并。拖动分隔线可调整大小。</p>
       <div class="layout-actions">
+        <a class="small-button" href="#sequence-optimizer">打开梯度优化</a>
         <details id="sequence-layout-menu"><summary class="button">面板布局</summary>
           <form class="layout-menu">
             <label>面板<select name="panel"></select></label>
@@ -48,19 +49,26 @@
           <fieldset class="seq-opt-settings">
             <legend class="sr-only">梯度优化设置</legend>
             <div class="seq-opt-grid">
-              <label>目标变量<select name="objective"><option value="psd">峰值 PSD</option><option value="atoms">阱内原子数</option><option value="temperatureUK">动能温度 / µK</option><option value="rmsRadiusMM">云团 RMS 半径 / mm</option></select></label>
+              <label>目标类别<select name="objectiveGroup"></select></label>
+              <label>搜索目标<input type="search" name="objectiveSearch" placeholder="名称或单位"></label>
+              <label class="seq-opt-full">目标变量<select name="objective" required></select></label>
               <label>优化方向<select name="direction"><option value="max">最大化</option><option value="min">最小化</option></select></label>
               <label>目标时刻 / ms<input type="number" name="timeMS" step="any" min="0" required></label>
-              <button type="button" class="small-button" data-opt="cursor">使用游标时刻</button>
             </div>
-            <p class="sequence-note">各候选时序在同一目标时刻评估。装载等待期间沿用捕获云快照。</p>
+            <div class="seq-opt-time"><button type="button" class="small-button" data-opt="cursor">使用游标时刻</button>
+              <span class="sequence-note" data-opt="time-note"></span></div>
             <details class="seq-opt-variables">
               <summary>操作变量 <span data-opt="selection"></span></summary>
-              <div class="seq-opt-checks"></div>
+              <div class="seq-opt-grid">
+                <label>变量类别<select name="variableGroup"></select></label>
+                <label>搜索操作变量<input type="search" name="variableSearch" placeholder="名称或单位"></label>
+              </div>
+              <div class="seq-opt-checks" role="group" aria-label="可直接设置的物理量与当前值"></div>
+              <p class="sequence-note" data-opt="empty-controls" hidden>没有符合筛选条件的操作变量。</p>
             </details>
             <label class="seq-opt-budget">最多试算次数<input type="number" name="maxEvaluations" min="2" step="1" value="32" required></label>
           </fieldset>
-          <div class="seq-opt-actions"><button type="submit" class="small-button" data-opt="start" disabled>开始优化</button><button type="button" class="small-button" data-opt="stop" disabled>停止优化</button><button type="button" class="small-button" data-opt="apply" disabled>应用最佳时序</button></div>
+          <div class="seq-opt-actions"><button type="submit" class="small-button" data-opt="start" disabled>开始优化</button><button type="button" class="small-button" data-opt="stop" disabled>停止优化</button><button type="button" class="small-button" data-opt="apply" disabled>应用最佳参数</button></div>
         </form>
         <p class="seq-opt-status" role="status" data-opt="status"></p>
         <div class="seq-opt-results" hidden>

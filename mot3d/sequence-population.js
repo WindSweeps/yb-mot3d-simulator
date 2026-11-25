@@ -38,6 +38,15 @@ function loadingRates(rate, alpha, beta) {
   return {scale, a, lambda:Math.hypot(a, 2 * (pairRate / scale))};
 }
 
+function loadingSteadyState(rate, alpha, beta) {
+  if (rate === 0) return 0;
+  if (alpha === 0 && beta === 0) return null;
+  const {scale, a, lambda} = loadingRates(rate, alpha, beta);
+  const factor = 2 / (lambda + a), scaled = rate / scale;
+  const atoms = Number.isFinite(scaled) ? scaled * factor : (rate * factor) / scale;
+  return Number.isFinite(atoms) ? atoms : null;
+}
+
 // dN/dt = R − αN − βN²，N(0)=0。返回连续模型的原子数期望值。
 export function loadPopulation(timeMS, flux, captureProbability, alpha, beta) {
   for (const [name, value] of Object.entries({ timeMS, flux, captureProbability, alpha, beta })) {
@@ -122,6 +131,8 @@ export function sequencePopulation(program, result, settings) {
   const stages = sequenceLossStages(program, settings).map((rates, i) => ({...program.stages[i], ...rates}));
   const load = stages[0];
   const p = captured / incident;
+  const loadingRate = flux * p;
+  const steadyState = loadingSteadyState(loadingRate, load.alpha, load.beta);
   const loaded = loadPopulation(load.durationMS, flux, p, load.alpha, load.beta);
   // 在精确的物理阶段边界和观察帧上分段。帧内沿用左端阱内计数，与成像一致。
   const starts = new Set(stages.slice(1).map(stage => stage.startMS));
@@ -155,10 +166,10 @@ export function sequencePopulation(program, result, settings) {
   }
   function timeConstants() {
     return {
-      loading:loadingTimeConstant(flux * p, load.alpha, load.beta),
+      loading:loadingTimeConstant(loadingRate, load.alpha, load.beta),
       loss:lossTimeConstant(intervals, program.durationMS, finalWeight, metrics.at(-1).count, loaded),
     };
   }
-  return {at, weightAt, loaded, timeConstants,
+  return {at, weightAt, loaded, timeConstants, loadingRate, steadyState,
     estimatedAtoms: {N0:loaded, N1:at(program.checkpointTimesMS[1], N1), N2:finalWeight * N2}};
 }

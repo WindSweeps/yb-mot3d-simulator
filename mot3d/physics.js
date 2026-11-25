@@ -85,7 +85,7 @@ export function fieldAt(pos, paramsOrCompiled = {}) {
 }
 
 // Internal scratch: [ax,ay,az,R(+V1),R(-V1),R(+V2),R(-V2),R(+H),R(-H)].
-export function evaluate(x, y, z, vx, vy, vz, c, out, s, transition = BLUE_TRANSITION) {
+export function evaluate(x, y, z, vx, vy, vz, c, out, s, transition = BLUE_TRANSITION, spectrum) {
   const { k, gamma, lande, recoil } = transition;
   const r2 = x*x + y*y + z*z;
   let saturation = 1;
@@ -96,16 +96,31 @@ export function evaluate(x, y, z, vx, vy, vz, c, out, s, transition = BLUE_TRANS
   }
   const bx = c.fieldSlope[0]*x + c.bias[0], by = c.fieldSlope[1]*y + c.bias[1], bz = c.fieldSlope[2]*z + c.bias[2];
   const b = Math.hypot(bx, by, bz), zeeman = lande * C.muB * b / C.hbar;
+  if (spectrum) {
+    spectrum.fieldTesla = b;
+    spectrum.zeeman = zeeman;
+  }
   let ax = 0, ay = 0, az = 0;
   for (let j = 0; j < 6; j++) {
     const d = BEAM_DIRECTIONS[j];
     const cosine = b > 0 ? Math.max(-1, Math.min(1, (d[0]*bx+d[1]*by+d[2]*bz) / b)) : 0;
     const hc = HELICITIES[j] * cosine;
-    const dp = 2 * (c.detuning - k*(d[0]*vx+d[1]*vy+d[2]*vz) - zeeman) / gamma;
+    const doppler = k*(d[0]*vx+d[1]*vy+d[2]*vz);
+    const dp = 2 * (c.detuning - doppler - zeeman) / gamma;
     const dz = dp + 2 * zeeman / gamma, dm = dz + 2 * zeeman / gamma;
+    const plus = .25*(1+hc)**2, pi = .5*(1-cosine*cosine), minus = .25*(1-hc)**2;
     const rate = .5 * gamma * s[j] * (
-      .25*(1+hc)**2 / (saturation+dp*dp) + .5*(1-cosine*cosine) / (saturation+dz*dz)
-      + .25*(1-hc)**2 / (saturation+dm*dm));
+      plus / (saturation+dp*dp) + pi / (saturation+dz*dz) + minus / (saturation+dm*dm));
+    if (spectrum) {
+      spectrum.doppler[j] = doppler;
+      const offset = 3*j;
+      spectrum.detuning[offset] = dm * gamma / 2;
+      spectrum.detuning[offset+1] = dz * gamma / 2;
+      spectrum.detuning[offset+2] = dp * gamma / 2;
+      spectrum.polarization[offset] = minus;
+      spectrum.polarization[offset+1] = pi;
+      spectrum.polarization[offset+2] = plus;
+    }
     out[3+j] = rate;
     ax += recoil * rate * d[0]; ay += recoil * rate * d[1]; az += recoil * rate * d[2];
   }

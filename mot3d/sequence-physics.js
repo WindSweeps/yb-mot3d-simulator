@@ -6,10 +6,14 @@ const greenK = 2 * Math.PI / 555.8e-9;
 export const GREEN_TRANSITION = Object.freeze({ k: greenK, gamma: 2 * Math.PI * 180000, lande: 1.5, recoil: C.hbar * greenK / C.mass });
 const radius = .003, domain = .15;
 
+export function saturationIntensity(transition) {
+  const wavelength = 2 * Math.PI / transition.k;
+  return Math.PI * C.h * C.c * transition.gamma / (3 * wavelength ** 3);
+}
+
 function line(model, transition, waistMM) {
   if (!Number.isFinite(waistMM) || waistMM < .1 || waistMM > 100) throw new RangeError('光束腰斑半径须在 0.1–100 mm 之间。');
-  const wavelength = 2 * Math.PI / transition.k;
-  const isat = Math.PI * C.h * C.c * transition.gamma / (3 * wavelength ** 3);
+  const isat = saturationIntensity(transition);
   const inverseWaistSquared = 1 / (waistMM * .001) ** 2;
   return {
     ...model, transition, peakS: new Float64Array(6), fieldSlope: new Float64Array(3),
@@ -43,15 +47,21 @@ function scratch() {
     acceleration: new Float64Array(3), blueRate: 0, greenRate: 0 };
 }
 
-function evaluateLine(pos, vel, c, output, saturation) {
-  if (!c.enabled) { output.fill(0); return 0; }
-  evaluate(pos[0], pos[1], pos[2], vel[0], vel[1], vel[2], c, output, saturation, c.transition);
+function lineSpectrum() {
+  return {saturation:new Float64Array(6), doppler:new Float64Array(6),
+    detuning:new Float64Array(18), polarization:new Float64Array(18), fieldTesla:0, zeeman:0};
+}
+
+function evaluateLine(pos, vel, c, output, saturation, spectrum) {
+  if (!c.enabled && !spectrum) { output.fill(0); return 0; }
+  evaluate(pos[0], pos[1], pos[2], vel[0], vel[1], vel[2], c, output,
+    spectrum ? spectrum.saturation : saturation, c.transition, spectrum);
   return output[3] + output[4] + output[5] + output[6] + output[7] + output[8];
 }
 
 function scattering(pos, vel, field, s) {
-  const rb = evaluateLine(pos, vel, field.blue, s.blue, s.saturation);
-  const rg = evaluateLine(pos, vel, field.green, s.green, s.saturation);
+  const rb = evaluateLine(pos, vel, field.blue, s.blue, s.saturation, s.spectrum?.blue);
+  const rg = evaluateLine(pos, vel, field.green, s.green, s.saturation, s.spectrum?.green);
   // 两个有效跃迁共享基态。分别保留单色平衡比 f/(1-f)，再用总布居为一归一化。
   const fb = rb / BLUE_TRANSITION.gamma, fg = rg / GREEN_TRANSITION.gamma, norm = 1 - fb * fg;
   const sb = (1 - fg) / norm, sg = (1 - fb) / norm;
@@ -63,10 +73,18 @@ function scattering(pos, vel, field, s) {
 }
 
 export function sequenceRadiation(position, velocity, params, channels) {
+  return prepareSequenceRadiation(params, channels)(position, velocity);
+}
+
+// 对同一通道状态下的多条轨迹复用光场和工作区，每次返回当前原子的结果。
+export function prepareSequenceRadiation(params, channels, {observeSpectrum = false} = {}) {
   const field = lightField(compile(params)), s = scratch();
+  if (observeSpectrum) s.spectrum = {blue:lineSpectrum(), green:lineSpectrum()};
   configure(field, channels);
-  scattering(position, velocity, field, s);
-  return s;
+  return (position, velocity) => {
+    scattering(position, velocity, field, s);
+    return s;
+  };
 }
 
 function recoil(velocity, dt, s, rng) {
@@ -155,17 +173,27 @@ export function prepareSequenceRun(input, config, options = {}) {
     if (!Number.isSafeInteger(point.steps)) throw new RangeError('观察间隔的积分步数超出可精确表示的整数范围。');
   }
   if (initial.length !== n*6 || initial.some(x => !Number.isFinite(x))) throw new RangeError('时序初始相空间尺寸或数值无效。');
-  const samples = n * grid.length;
   const result = {
     n, frameCount:grid.length, stages:program.stages, loadWindowMS:loadEnd,
     timesMS:Float64Array.from(grid, point => point.time),
     metrics:[], summary:{N0:0, N1:0, N2:0},
   };
-  // 优化器只消费各帧统计量，普通时序同时保留回放和成像的逐原子记录。
-  if (!options.metricsOnly) Object.assign(result, {
-    positionsM:new Float32Array(samples * 3), alive:new Uint8Array(samples), trapped:new Uint8Array(samples),
-    blueRates:new Float32Array(samples), greenRates:new Float32Array(samples),
-  });
+  // 候选相机曝光只保留窗口内逐原子记录。各帧统计量仍覆盖完整时序。
+  if (!options.metricsOnly || options.recordFromMS != null) {
+    let first = 0, last = grid.length - 1;
+    if (options.recordFromMS != null) {
+      if (!Number.isFinite(options.recordFromMS) || !(options.recordFromMS >= 0 && options.recordFromMS <= observeAtMS))
+        throw new RangeError('轨迹记录起点须位于目标时刻之前。');
+      first = grid.findLastIndex(point => point.time <= options.recordFromMS);
+      last = grid.findLastIndex(point => point.time <= observeAtMS);
+    }
+    const samples = n * (last - first + 1);
+    Object.assign(result, {firstRecordedFrame:first,
+      positionsM:new Float32Array(samples * 3), alive:new Uint8Array(samples), trapped:new Uint8Array(samples),
+      blueRates:new Float32Array(samples), greenRates:new Float32Array(samples),
+    });
+    if (options.observeVelocity) result.velocitiesMS = new Float32Array(samples * 3);
+  }
   return {model, field, program, grid, loadEnd, initial, result};
 }
 
@@ -174,10 +202,16 @@ function frameMoments() {
 }
 
 function writeAtom(result, k, pos, offsetP, vel, offsetV, live, trapped, blueRate, greenRate, m) {
-  if (result.positionsM) {
+  k -= (result.firstRecordedFrame ?? 0) * result.n;
+  if (result.positionsM && k >= 0 && k < result.alive.length) {
     result.positionsM[3*k] = pos[offsetP];
     result.positionsM[3*k+1] = pos[offsetP+1];
     result.positionsM[3*k+2] = pos[offsetP+2];
+    if (result.velocitiesMS) {
+      result.velocitiesMS[3*k] = vel[offsetV];
+      result.velocitiesMS[3*k+1] = vel[offsetV+1];
+      result.velocitiesMS[3*k+2] = vel[offsetV+2];
+    }
     if (live) {
       result.alive[k] = 1;
       result.blueRates[k] = blueRate;
@@ -231,8 +265,16 @@ function finishFrame(run, frame, m) {
   if (checkpoint) run.result.summary[checkpoint] = m.live;
   const width = scatter[0] + scatter[7] + scatter[14];
   const thermal = scatter[21] + scatter[28] + scatter[35];
+  let sampleCovariance = null;
+  if (count > 1) {
+    sampleCovariance = new Float64Array(21);
+    let entry = 0;
+    for (let row = 0; row < 6; row++) for (let col = 0; col <= row; col++)
+      sampleCovariance[entry++] = scatter[6*row + col] / (count - 1);
+  }
   run.result.metrics.push({
     count, centroidMM:count ? [1000*mean[0], 1000*mean[1], 1000*mean[2]] : null,
+    meanVelocityMS:count ? [mean[3],mean[4],mean[5]] : null, sampleCovariance,
     rmsRadiusMM:count ? 1000*Math.sqrt(width/count) : null,
     temperatureUK:count > 1 ? C.mass*Math.max(0,thermal)*1e6/(3*C.kB*(count-1)) : null,
     psdPerAtom:phaseSpaceDensityPerAtom(count, scatter),

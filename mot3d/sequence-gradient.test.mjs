@@ -3,8 +3,9 @@ import test from 'node:test';
 import { blueSequence, compileSequence, songSequence } from './sequence.js';
 import { createCandidateScorer } from './sequence-candidate-score.js';
 import { simulateSequence } from './sequence-physics.js';
-import { sequencePopulation } from './sequence-population.js';
+import { sequenceLossStages, sequencePopulation } from './sequence-population.js';
 import { optimizeSequence } from './sequence-gradient.js';
+import { experimentControls, readControl, setControl } from './sequence-controls.js';
 
 const config = {...songSequence(), greenEnabled:false, loadMS:1, handoffMS:.25, greenMS:.25, compressMS:.5,
   blueObliqueMW:6, blueHorizontalMW:4};
@@ -153,4 +154,122 @@ test('等比斜坡的功率搜索可越过半功率并始终严格为正', async
   assert.equal(tried.length, result.evaluations);
   assert.equal(result.bestValue, result.baseline);
   assert.ok(Math.min(...tried) < 4 && tried.every(value => value > 0));
+});
+
+test('控制目录按时序模式区分通道和损失，并沿用光闸对应的物理系数', () => {
+  const blue = {config:blueSequence()}, twoColor = {config:songSequence()};
+  const ids = experimentControls(blue).map(control => control.id);
+  assert.equal(new Set(ids).size, ids.length);
+  assert.ok(ids.includes('loading.holdBeta') && ids.includes('params.biasPerAmp.2') && ids.includes('imaging.mode'));
+  for (const id of ['loading.compressBeta','powerRamp','greenEnabled','params.greenWaistMM','params.seed','params.dtUS','params.n','imaging.displayGain'])
+    assert.ok(!ids.includes(id), id);
+  assert.ok(experimentControls(twoColor).some(control => control.id === 'loading.compressAlpha'));
+  assert.equal(readControl(twoColor, 'loading.beta'), 1.7e-9);
+  assert.equal(readControl(setControl(twoColor,'greenEnabled',false),'loading.beta'), 27e-9);
+  assert.equal(readControl(setControl(blue,'blueEnabled',false),'loading.beta'), 0);
+});
+
+test('候选装置的三轴偏置分量可独立优化并直接在物理模拟中复现', async () => {
+  const experiment = {config, params:{...apparatus, biasCurrentA:[0,.2,-.1], biasPerAmp:[2,1,1]}, loading:{flux:1e7}, imaging:{}};
+  const initial = structuredClone(experiment);
+  const timeMS = 1, scorer = await createCandidateScorer({...experiment, timeMS, metric:'biasX'});
+  const observed = [];
+  const result = await optimizeSequence({experiment, timeMS, variables:['params.biasCurrentA.0'], direction:'max',
+    maxEvaluations:8, async evaluate(candidate) {
+      const {value} = await scorer.evaluate(candidate);
+      assert.equal(value, candidate.params.biasCurrentA[0] * 2);
+      observed.push(value);
+      return value;
+    }});
+  assert.equal(result.bestValue, Math.max(...observed));
+  assert.ok(result.bestValue > 0 && result.bestExperiment.params.biasCurrentA[0] > 0);
+  assert.deepEqual(result.bestExperiment.params.biasCurrentA.slice(1), initial.params.biasCurrentA.slice(1));
+  assert.deepEqual(experiment, initial);
+  assert.equal((await scorer.evaluate(result.bestExperiment)).value, result.bestValue);
+  scorer.destroy();
+});
+
+test('初始损失时间常数无定义时，试算可取得可复现的首次 1/e 时间', async () => {
+  const experiment = {config:{...blueSequence(), loadMS:1, holdMS:1}, params:apparatus,
+    loading:{flux:1e7, holdAlpha:980, holdBeta:0}, imaging:{}};
+  const timeMS = 2, scorer = await createCandidateScorer({...experiment, timeMS, metric:'lossTauMS'});
+  const result = await optimizeSequence({experiment, timeMS, variables:['loading.holdAlpha'], direction:'min',
+    maxEvaluations:8, evaluate:async candidate => (await scorer.evaluate(candidate)).value});
+  assert.equal(result.baseline, null);
+  assert.ok(result.bestValue > 0 && result.bestValue <= 1);
+  assert.ok(result.bestExperiment.loading.holdAlpha > 1000);
+  assert.equal((await scorer.evaluate(result.bestExperiment)).value, result.bestValue);
+  scorer.destroy();
+});
+
+test('光闸和成像波段以有效离散值试算，保留最佳相机信号', async () => {
+  const experiment = {config:{...config,blueEnabled:false}, params:apparatus, loading:{flux:1e7}, imaging:{band:'556'}};
+  const timeMS = .8, scorer = await createCandidateScorer({...experiment, timeMS, metric:'camera.fluorescence.total'});
+  const attempts = [];
+  const result = await optimizeSequence({experiment, timeMS,
+    variables:['blueEnabled','imaging.band'], direction:'max', maxEvaluations:10,
+    async evaluate(candidate) {
+      const {value} = await scorer.evaluate(candidate);
+      attempts.push([candidate.config.blueEnabled, candidate.imaging.band, value]);
+      return value;
+    }});
+  assert.equal(result.baseline, 0);
+  assert.equal(result.bestExperiment.config.blueEnabled, true);
+  assert.ok(result.bestValue > 0 && result.bestValue === Math.max(...attempts.map(([, , value]) => value)));
+  assert.ok(attempts.some(([on,band,value]) => on && band === '556' && value === 0));
+  scorer.destroy();
+});
+
+test('较小预算下的同时扰动实际改变全部选定装置参数', async () => {
+  const experiment = {config, params:apparatus, loading:{flux:1e7}, imaging:{}};
+  const variables = ['params.sourceSpeed','params.sourceSpread','params.sourceRadiusMM','params.sourceTempMK'];
+  const timeMS = 1, scorer = await createCandidateScorer({...experiment, timeMS, metric:'temperatureUK'});
+  const result = await optimizeSequence({experiment, variables, timeMS, direction:'min', maxEvaluations:2,
+    evaluate:async candidate => (await scorer.evaluate(candidate)).value});
+  assert.equal(result.evaluations, 2);
+  for (const id of variables) assert.notEqual(readControl(experiment,id), readControl(result.lastExperiment,id), id);
+  assert.ok(result.bestValue <= result.baseline && result.bestValue > 0);
+  scorer.destroy();
+});
+
+test('双体损失在文献系数量级估计局部导数，未改动的空字段继续继承参考值', async () => {
+  const experiment = {config, params:apparatus, loading:{flux:1e7}, imaging:{}};
+  const timeMS = 1, scorer = await createCandidateScorer({...experiment, timeMS, metric:'atoms'});
+  const beta = readControl(experiment,'loading.beta'), probes = [];
+  assert.equal(beta, 27e-9);
+  const result = await optimizeSequence({experiment, timeMS, variables:['loading.beta'], direction:'max', maxEvaluations:3,
+    async evaluate(candidate) {
+      probes.push(readControl(candidate,'loading.beta'));
+      assert.equal(candidate.loading.alpha, undefined);
+      return (await scorer.evaluate(candidate)).value;
+    }});
+  assert.ok(probes[1] < beta && probes[2] > beta && probes.every(value => value > .5 * beta && value < 2 * beta));
+  assert.equal(experiment.loading.beta, undefined);
+  assert.ok(result.bestValue > result.baseline);
+  scorer.destroy();
+});
+
+test('光闸、各束功率和手动设置共同确定优化读数与原子数模型使用的损失系数', () => {
+  const dark = [.012,0], blueLoad = [1.3,27e-9], blueHold = [.54,44e-9];
+  const cases = [
+    [songSequence(), [[.53,1.7e-9],[.21,1e-9],dark,dark]],
+    [{...songSequence(),greenEnabled:false}, [blueLoad,blueHold,dark,dark]],
+    [{...songSequence(),blueEnabled:false}, [dark,dark,dark,dark]],
+    [{...songSequence(),blueEnabled:false,greenEnabled:false}, [dark,dark,dark,dark]],
+    [{...songSequence(),blueObliqueMW:0,blueHorizontalMW:0}, [dark,dark,dark,dark]],
+    [blueSequence(), [blueLoad,blueHold]],
+    [{...blueSequence(),blueEnabled:false}, [dark,dark]],
+  ];
+  for (const [sequence,expected] of cases) {
+    const program = compileSequence(sequence);
+    for (const loading of [{}, {alpha:0, beta:5e-9, handoffBeta:0, holdAlpha:.4}]) {
+      const stages = sequenceLossStages(program, loading);
+      for (const [i,{id,alpha,beta}] of stages.entries()) {
+        const ak = id === 'load' ? 'alpha' : id + 'Alpha', bk = id === 'load' ? 'beta' : id + 'Beta';
+        assert.deepEqual([alpha,beta], [loading[ak] ?? expected[i][0], loading[bk] ?? expected[i][1]]);
+        assert.equal(readControl({config:sequence, loading},'loading.' + ak), alpha);
+        assert.equal(readControl({config:sequence, loading},'loading.' + bk), beta);
+      }
+    }
+  }
 });
