@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { checkBlueBranches } from './tests/blue-branch-checks.mjs';
 import { DEFAULTS, CONSTANTS as C, BEAM_DIRECTIONS, derive, compile, fieldAt,
   radiation, opticalAcceleration, acceleration, simulate, sampleInitialStates } from './physics.js';
 
@@ -212,4 +213,5 @@ check('Stochastic step refinement agrees at the finite-N count scale',()=>{
     speed5us:full.summary.meanSpeed,speed2_5us:half.summary.meanSpeed,elapsedMS:half.summary.elapsedMS}));
   assert.ok(Math.abs(p-q)<=tolerance);
 });
+console.log('BLUE_BRANCHES', await checkBlueBranches(simulate));
 console.log(`${passed} checks passed`);

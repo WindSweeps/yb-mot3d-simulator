@@ -33,7 +33,7 @@ async function runPending() {
       if (!isCurrent() || !result) continue;
       result.summary.backend = engine ? 'WebGPU' : 'CPU';
       const transfer = ['frames', 'frameAlive', 'framePhotons', 'times', 'finalPositions', 'finalVelocities',
-        'alive', 'retained', 'initialLongitudinalVelocities'].map(key => result[key].buffer);
+        'alive', 'retained', 'darkState', 'initialLongitudinalVelocities'].map(key => result[key].buffer);
       self.postMessage({ id, result }, transfer);
     } catch (error) {
       if (isCurrent()) self.postMessage({ id, error: error.message || String(error) });

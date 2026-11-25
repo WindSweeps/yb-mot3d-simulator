@@ -207,7 +207,7 @@
             <p id="polarization-citations" class="basis-citations"><a href="https://physics.nist.gov/PhysRefData/Handbook/Tables/ytterbiumtable5.htm" target="_blank" rel="noopener">NIST · Yb 能级表</a><a href="https://arxiv.org/pdf/1912.08065#page=2" target="_blank" rel="noopener">Lauprêtre 等 · 399 nm 光谱</a><a href="https://arxiv.org/pdf/1409.0244#page=4" target="_blank" rel="noopener">Tarbutt · Zeeman 项与偏振选择定则</a><a href="./reports/2026-10-30-source-polarization/REPORT.md" target="_blank" rel="noopener">40 m/s 冷束重算与偏振核查 ↗</a></p>
           </div>
         </details>
-        <details class="method-details"><summary><span>模型与参数说明</span><span class="summary-value">半经典光力 + 随机反冲</span></summary><div class="method-content"><p>逐步积分六束 Gaussian 光的散射力、四极场 Zeeman 位移与重力，用随机光子反冲描述动量扩散。偏置磁场移动零场位置，功率不平衡改变各向散射力。</p><p>左栏可设置线圈标定系数与冷束初态。留存比例、平均速率和云半径取自末态留存集合。回放时，三维演示和连续入射的荧光读数使用同一条模拟时间轴。</p><p><a href="./METHOD.md" target="_blank" rel="noopener">查看模型、参考资料与验证记录 ↗</a></p></div></details>
+        <details class="method-details"><summary><span>模型与参数说明</span><span class="summary-value">光力、反冲与暗态分支</span></summary><div class="method-content"><p>逐步积分六束 Gaussian 光的散射力、四极场 Zeeman 位移与重力，用随机光子反冲描述动量扩散。根据每条轨迹累计的蓝光散射次数，抽样进入 ³P₀ 或 ³P₂ 的时刻。当前模型没有再泵浦光，进入暗态后结束该原子的亮态轨迹与 399 nm 荧光。</p><p>留存比例以全体入射轨迹为分母。平均速率和云半径取自末态留存集合。回放时，三维演示和连续入射的荧光读数使用同一条模拟时间轴。</p><p><a href="./METHOD.md" target="_blank" rel="noopener">查看模型、参考资料与验证记录 ↗</a></p></div></details>
         <div class="bottom-actions"><span id="storage-status" role="status" aria-live="polite">设置仅保存在本机浏览器</span><button id="export-json" class="text-button">导出参数 JSON ↓</button></div>
       </section>
     </div>
@@ -234,6 +234,9 @@ struct Atom {
   nextFrame: u32,
   wholePhotons: u32,
   fractionalPhotons: f32,
+  photonBudget: f32,
+  branchTarget: u32,
+  darkState: u32,
 }
 
 struct Chunk {
@@ -343,20 +346,30 @@ fn advance(@builtin(global_invocation_id) invocation: vec3u) {
     let midPosition = atom.position + (0.5 * dt) * atom.velocity;
     let midVelocity = atom.velocity + (0.5 * dt) * (startRates.acceleration + gravity);
     let midRates = radiation(midPosition, midVelocity, axes, helicity, positivePeaks, negativePeaks);
-    let stepPhotons = dot(midRates.pairRates, vec3f(1.0)) * dt;
-    atom.position += dt * midVelocity;
-    atom.velocity += dt * (midRates.acceleration + gravity);
+    let totalRate = dot(midRates.pairRates, vec3f(1.0));
+    let fullStepPhotons = totalRate * dt;
+    let remaining = atom.photonBudget - f32(atom.wholePhotons) - chunkPhotons;
+    var brightFraction = 1.0;
+    var entersDark = fullStepPhotons > 0.0 && fullStepPhotons >= remaining;
+    if (entersDark) {
+      brightFraction = max(0.0, remaining) / fullStepPhotons;
+    }
+    let brightDt = dt * brightFraction;
+    let stepPhotons = totalRate * brightDt;
+    atom.position += brightDt * (atom.velocity + 0.5 * brightDt * (startRates.acceleration + gravity));
+    atom.velocity += brightDt * (midRates.acceleration + gravity);
     if (parameters.integration.w != 0.0) {
       let normal01 = normalPair(&rng);
       let normal23 = normalPair(&rng);
       let normal45 = normalPair(&rng);
-      let absorption = sqrt(midRates.pairRates * dt) * vec3f(normal01, normal23.x);
+      let absorption = sqrt(midRates.pairRates * brightDt) * vec3f(normal01, normal23.x);
       let emission = sqrt(stepPhotons / 3.0);
       atom.velocity += recoilSpeed * (axes * absorption + emission * vec3f(normal23.y, normal45));
     }
     let radiusSquared = dot(atom.position, atom.position);
     let finiteVelocity = all((bitcast<vec3u>(atom.velocity) & vec3u(0x7f800000u)) != vec3u(0x7f800000u));
     if (!(radiusSquared <= 0.15 * 0.15) || !finiteVelocity) {
+      entersDark = false;
       atom.visibleFrames = atom.nextFrame;
       atom.held = 0u;
     }
@@ -369,11 +382,21 @@ fn advance(@builtin(global_invocation_id) invocation: vec3u) {
     while (atom.nextFrame < frameCount && atom.nextFrame * totalSteps <= completed * intervals) {
       let numerator = atom.nextFrame * totalSteps - step * intervals;
       let fraction = f32(numerator) / f32(intervals);
+      if (entersDark && fraction >= brightFraction) {
+        atom.visibleFrames = min(atom.visibleFrames, atom.nextFrame);
+      }
+      var progress = 0.0;
+      if (brightFraction > 0.0) { progress = min(1.0, fraction / brightFraction); }
       history[atom.nextFrame * atomCount + atomId] =
-        vec4f(mix(oldPosition, atom.position, fraction), f32(atom.wholePhotons) + (chunkPhotons + fraction * stepPhotons));
+        vec4f(mix(oldPosition, atom.position, progress), f32(atom.wholePhotons) + (chunkPhotons + progress * stepPhotons));
       atom.nextFrame++;
     }
     chunkPhotons += stepPhotons;
+    if (entersDark) {
+      atom.darkState = atom.branchTarget;
+      atom.visibleFrames = min(atom.visibleFrames, atom.nextFrame);
+      atom.held = 0u;
+    }
     if (atom.visibleFrames < frameCount) {
       while (atom.nextFrame < frameCount) {
         history[atom.nextFrame * atomCount + atomId] = vec4f(atom.position, f32(atom.wholePhotons) + chunkPhotons);

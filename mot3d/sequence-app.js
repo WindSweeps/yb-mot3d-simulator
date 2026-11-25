@@ -17,10 +17,11 @@ const $ = selector => elements.get(selector);
 const form = $('#sequence-inputs');
 const fields = Array.from(form.elements);
 const loadingForm = $('#seq-loading-inputs');
-const loadingFields = Array.from(loadingForm.elements);
+const loadingFields = Array.from(loadingForm.querySelectorAll('input'));
+const alphaModeField = $('#seq-alpha-mode');
 const lossRows = Array.from(loadingForm.querySelectorAll('[data-loss-stage]'));
 const checkpointButtons = Array.from(document.querySelectorAll('[data-checkpoint]'));
-const formatId = 'yb-mot-sequence-v1';
+const formatId = 'yb-mot-sequence-v2';
 const blank = '—';
 const maxFileBytes = 256000;
 const atomFormat = new Intl.NumberFormat('zh-CN', {notation:'compact', maximumSignificantDigits:3});
@@ -54,6 +55,7 @@ async function initialInputs() {
 }
 
 function fillLoadingInputs() {
+  alphaModeField.value = loading.alphaMode ?? 'background';
   for (const field of loadingFields) field.value = loading[field.name] ?? '';
 }
 
@@ -68,13 +70,19 @@ function fillInputs() {
 
 function showReferenceLoss() {
   const labels = {blue:'蓝光', green:'绿光', twoColor:'双色光', dark:'无光'};
-  const stages = sequenceLossStages(program);
+  const stages = sequenceLossStages(program, {alphaMode:alphaModeField.value});
+  const total = alphaModeField.value === 'total';
+  $('#seq-alpha-label').textContent = total ? '总单体 α 目标' : '背景单体 α';
+  $('#seq-alpha-note').textContent = total
+    ? '总损失目标包含光学分支。模型从总系数中扣除模拟分支损失率，剩余背景最低取零。留空时沿用宋博组表 II 的总单体损失系数。'
+    : '背景单体损失默认取宋博组给出的背景碰撞率上限 0.012 s⁻¹。模拟另外根据 399 nm 和 556 nm 散射造成的暗态跃迁计算光学损失。';
   for (const row of lossRows) {
     const stage = stages.find(s => s.id === row.dataset.lossStage);
     const [alpha, beta] = row.querySelectorAll('input');
     row.hidden = !stage;
     alpha.disabled = beta.disabled = !stage;
     if (!stage) continue;
+    alpha.setAttribute('aria-label', row.querySelector('th').firstChild.textContent + (total ? '总单体损失目标' : '背景单体损失系数'));
     row.querySelector('small').textContent = labels[stage.light];
     alpha.placeholder = String(stage.alpha);
     beta.placeholder = String(stage.beta);
@@ -84,6 +92,7 @@ function showReferenceLoss() {
   $('#sequence-heading').textContent = heading;
   document.title = 'Yb · ' + heading;
   $('#sequence-wavelengths').textContent = blueOnly ? '¹⁷⁴Yb · 399 nm' : '¹⁷⁴Yb · 399 nm / 556 nm';
+  $('#seq-green-branch').hidden = blueOnly;
   checkpointButtons[1].textContent = blueOnly ? '保持中点 N₁' : '纯绿接收 N₁';
   checkpointButtons[2].textContent = blueOnly ? '保持结束 N₂' : '压缩结束 N₂';
   $('#seq-total-label').textContent = blueOnly ? '保持留存 N₂ / N₀' : '转移和压缩合计 N₂ / N₀';
@@ -175,6 +184,9 @@ function showFrame(t) {
   scene?.setSequenceFrame({ ...sample, loadingSource: result });
   imaging.setFrame(point.cameraFrame());
   $('#seq-count').textContent = metric?.count ?? blank;
+  $('#seq-blue-p0').textContent = metric?.darkBranches.blueP0 ?? blank;
+  $('#seq-blue-p2').textContent = metric?.darkBranches.blueP2 ?? blank;
+  $('#seq-green-p0').textContent = metric?.darkBranches.greenP0 ?? blank;
   $('#seq-temperature').textContent = numberOrBlank(metric?.temperatureUK, 1);
   $('#seq-radius').textContent = numberOrBlank(metric?.rmsRadiusMM, 3);
   curves.setCursor(timeMS, count, psd);
@@ -356,8 +368,8 @@ function initializeScene() {
 $('#sequence-export').addEventListener('click', () => {
   const preset = editor.getPreset();
   const file = { format:formatId, presetId:preset.id, presetName:preset.name, config:editor.getConfig(),
-    params, loading:Object.fromEntries(loadingFields.filter(field => !field.disabled && field.name in loading)
-      .map(field => [field.name, loading[field.name]])), imaging:imaging.getSettings(), summary:result?.summary ?? null };
+    params, loading:{alphaMode:alphaModeField.value, ...Object.fromEntries(loadingFields.filter(field => !field.disabled && field.name in loading)
+      .map(field => [field.name, loading[field.name]]))}, imaging:imaging.getSettings(), summary:result?.summary ?? null };
   if (observeAtMS !== undefined) file.observeAtMS = observeAtMS;
   if (result) file.samplingDiagnostics = result.samplingDiagnostics;
   if (population) {
@@ -376,7 +388,8 @@ $('#sequence-file').addEventListener('change', async event => {
   try {
     if (file.size > maxFileBytes) throw new Error('文件超过 256 KB。');
     const data = JSON.parse(await file.text());
-    if (data.format !== formatId || !data.params) throw new Error('请选择本工作台导出的时序 JSON。');
+    const legacy = data.format === 'yb-mot-sequence-v1';
+    if ((!legacy && data.format !== formatId) || !data.params) throw new Error('请选择本工作台导出的时序 JSON。');
     const compiled = compileSequence(data.config);
     if (data.observeAtMS !== undefined && (!Number.isFinite(data.observeAtMS) ||
         data.observeAtMS < 0 || data.observeAtMS > compiled.durationMS))
@@ -392,7 +405,9 @@ $('#sequence-file').addEventListener('change', async event => {
     }
     if (data.loading != null && (typeof data.loading !== 'object' || Array.isArray(data.loading)))
       throw new Error('通量和损失参数须保存在 JSON 对象中。');
-    const importedLoading = { flux:imported.incidentFlux ?? DEFAULT_FLUX, ...data.loading };
+    const alphaMode = legacy ? 'total' : data.loading?.alphaMode;
+    if (!['background', 'total'].includes(alphaMode)) throw new Error('时序文件缺少有效的单体损失系数定义。');
+    const importedLoading = { flux:imported.incidentFlux ?? DEFAULT_FLUX, ...data.loading, alphaMode };
     for (const field of loadingFields) {
       if (!(field.name in importedLoading)) continue;
       const v = importedLoading[field.name];
@@ -402,7 +417,7 @@ $('#sequence-file').addEventListener('change', async event => {
     const name = typeof data.presetName === 'string' && data.presetName.trim() ? data.presetName : file.name.replace(/\.json$/i, '');
     loadExperiment({config:compiled.config, params:imported, loading:importedLoading, imaging:validateImagingSettings(data.imaging)},
       {presetId:data.presetId, name}, data.observeAtMS);
-    $('#sequence-file-status').textContent = '已载入 ' + file.name;
+    $('#sequence-file-status').textContent = '已载入 ' + file.name + (legacy ? ' · 沿用总单体损失目标' : '');
   } catch (e) {
     $('#sequence-file-status').textContent = '导入未完成 · ' + e.message;
     return;
@@ -421,8 +436,12 @@ for (const [index, button] of checkpointButtons.entries()) button.addEventListen
   editor.setTime(program.checkpointTimesMS[index]);
 });
 form.addEventListener('submit', event => event.preventDefault());
-loadingForm.addEventListener('input', () => {
+loadingForm.addEventListener('input', event => {
   optimization.invalidate();
+  if (event.target === alphaModeField) {
+    loading.alphaMode = alphaModeField.value;
+    showReferenceLoss();
+  }
   if (loadingForm.checkValidity()) {
     for (const field of loadingFields) {
       if (field.disabled) continue;

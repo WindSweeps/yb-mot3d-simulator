@@ -1,6 +1,6 @@
 import { derive, magneticCenterMM } from './physics.js';
 import { sequenceAt } from './sequence.js';
-import { sequenceLossStages, sequencePopulation } from './sequence-population.js';
+import { sequencePopulation } from './sequence-population.js';
 import { cloudSamples, fluorescenceExposure, sequenceFrameAt } from './sequence-exposure.js';
 import { simulateImagingFrame } from './sequence-imaging.js';
 
@@ -44,7 +44,7 @@ export function sequenceObservation(experiment, program, result, timeMS, {
     return view;
   }
   return {...point, experiment, program, result, population, channels, geometry, center, stage, cameraFrame,
-    get loss() { return sequenceLossStages(program, experiment.loading)[channels.stageIndex]; },
+    get loss() { return population?.lossAt(channels.stageIndex, point.frame); },
     get cloudField() {
       return point.cloud?.centroidMM?.map((position, i) =>
         geometry.biasG[i] + position / 10 * channels.gradientGCM * geometry.mainTensor[i]) ?? null;

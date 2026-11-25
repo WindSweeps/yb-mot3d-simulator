@@ -125,6 +125,11 @@
           <div><span>动能温度</span><output><b id="seq-temperature">—</b> µK</output></div>
           <div><span>云团 RMS 半径</span><output><b id="seq-radius">—</b> mm</output></div>
         </div>
+        <div class="sequence-stat-grid" aria-label="累计进入暗态的模拟轨迹数">
+          <div><span>399 nm → ³P₀ 轨迹数</span><output id="seq-blue-p0">—</output></div>
+          <div><span>399 nm → ³P₂ 轨迹数</span><output id="seq-blue-p2">—</output></div>
+          <div id="seq-green-branch"><span>556 nm → ³P₀ 轨迹数</span><output id="seq-green-p0">—</output></div>
+        </div>
         <table class="sequence-transfer"><thead><tr><th scope="col">观察时刻</th><th scope="col">估计原子数</th><th scope="col">留存轨迹</th><th scope="col">捕获 / 转移效率</th></tr></thead><tbody>
           <tr><th scope="row"><button type="button" class="text-button" data-checkpoint="0">装载结束 N₀</button></th><td id="seq-atoms-n0">—</td><td id="seq-n0">—</td><td id="seq-e0">—</td></tr>
           <tr><th scope="row"><button type="button" class="text-button" data-checkpoint="2">纯绿接收 N₁</button></th><td id="seq-atoms-n1">—</td><td id="seq-n1">—</td><td id="seq-e1">—</td></tr>
@@ -136,7 +141,8 @@
         <details class="sequence-loading-controls"><summary>入射通量与各阶段损失</summary>
           <form id="seq-loading-inputs">
             <label>入射通量 Φ / (原子/s)<input name="flux" type="number" min="0" max="1e15" step="any" value="1e9" required></label>
-            <table class="sequence-loss-table"><thead><tr><th scope="col">阶段 / 光场</th><th scope="col">单体 α<br>s⁻¹</th><th scope="col">双体 β<br>(原子·s)⁻¹</th></tr></thead><tbody>
+            <label>单体损失系数定义<select id="seq-alpha-mode" name="alphaMode"><option value="background">背景损失（光学分支单独计算）</option><option value="total">总损失目标（含光学分支）</option></select></label>
+            <table class="sequence-loss-table"><thead><tr><th scope="col">阶段 / 光场</th><th scope="col"><span id="seq-alpha-label">背景单体 α</span><br>s⁻¹</th><th scope="col">双体 β<br>(原子·s)⁻¹</th></tr></thead><tbody>
               <tr data-loss-stage="load"><th scope="row">装载<small></small></th><td><input aria-label="装载单体损失系数" name="alpha" type="number" min="0" max="1e4" step="any"></td><td><input aria-label="装载双体损失系数" name="beta" type="number" min="0" max="1" step="any"></td></tr>
               <tr data-loss-stage="handoff"><th scope="row">交接<small></small></th><td><input aria-label="交接单体损失系数" name="handoffAlpha" type="number" min="0" max="1e4" step="any"></td><td><input aria-label="交接双体损失系数" name="handoffBeta" type="number" min="0" max="1" step="any"></td></tr>
               <tr data-loss-stage="green"><th scope="row">纯绿接收<small></small></th><td><input aria-label="接收单体损失系数" name="greenAlpha" type="number" min="0" max="1e4" step="any"></td><td><input aria-label="接收双体损失系数" name="greenBeta" type="number" min="0" max="1" step="any"></td></tr>
@@ -144,9 +150,10 @@
               <tr data-loss-stage="hold" hidden><th scope="row">关源保持<small></small></th><td><input aria-label="保持单体损失系数" name="holdAlpha" type="number" min="0" max="1e4" step="any"></td><td><input aria-label="保持双体损失系数" name="holdBeta" type="number" min="0" max="1" step="any"></td></tr>
             </tbody></table>
           </form>
-          <p class="sequence-note">装载时按 dN/dt = Φp − αN − βN² 计算，其中 p 为轨迹捕获率。关闭原子束后，模型按阱内原子数继续计算单体与双体损失，并按轨迹统计逃逸。表中装载效率为轨迹捕获率，后续转移效率为含损失的原子数之比。</p>
-          <p class="sequence-note" id="seq-loading-reference">按论文的双色装载率 8.4 × 10⁷ 原子/s 计算，稳态为 1.16 × 10⁸ 个原子，表 II 报告 1.15 × 10⁸。网页预设采用上方通量与模拟捕获率计算装载率。</p>
-          <p class="sequence-note">系数随开启的光色选择。装载使用宋博组表 II 的装载拟合，关闭原子束后使用对应光色的保持拟合。论文的 β 按整团原子数定义，纯绿光 β ≈ 0，计算取零。双光均关闭时，单体背景损失按论文给出的上限 0.012 s⁻¹ 估算，双体系数取零。输入数值可单独标定各阶段，清空即可恢复默认值。<a href="https://arxiv.org/html/2503.24383v2#S5.T2" target="_blank" rel="noopener">宋博组，表 II 与式（3）↗</a></p>
+          <p class="sequence-note">装载率为入射通量 Φ 乘以亮态捕获概率 p。持续装载期间，模型按捕获云的平均散射率计算暗态损失。关源后逐条轨迹记录进入暗态或逃逸的原子。</p>
+          <p class="sequence-note" id="seq-loading-reference">宋博组测得双色 MOT 装载率为 8.4 × 10⁷ 原子/s，稳态为 1.15 × 10⁸ 个原子。<a href="https://arxiv.org/html/2503.24383v2#S5.T2" target="_blank" rel="noopener">宋博组，表 II ↗</a></p>
+          <p class="sequence-note" id="seq-alpha-note"></p>
+          <p class="sequence-note">双体损失按 βN² 计算，β 取宋博组表 II 中相应光色的装载或保持拟合值。纯绿与无光阶段取零。清空输入可恢复该阶段的默认系数。</p>
         </details>
       </section>
     </div>
@@ -164,6 +171,7 @@
       <p id="sequence-light-force">模拟逐步计算每个 ¹⁷⁴Yb 原子受到的平均辐射压力。399 nm 蓝光驱动 ¹S₀ → ¹P₁，556 nm 绿光驱动 ¹S₀ → ³P₁。两条跃迁共享同一个基态。每个激发态都有 <i>m′</i> = −1、0、+1 三个磁子能级，分别与相对于局部磁场方向的 σ⁻、π、σ⁺ 偏振分量耦合。<a href="https://arxiv.org/html/2503.24383v2#S4" target="_blank" rel="noopener">Li 等，双色 MOT 的能级与布居 ↗</a></p>
       <p>每束光对每条跃迁分量的有效失谐为 Δ<sub>eff</sub> = Δ − <b>k</b>·<b>v</b> − <i>m′g′</i>μ<sub>B</sub>|<b>B</b>|/ℏ，各项均用角频率。运动产生多普勒频移，局部磁场使三个磁子能级发生不同的塞曼频移。结合原子所在位置的高斯光强、偏振权重和饱和效应，模型算出每束光的散射率，并按共享基态的布居修正两种颜色的散射率。</p>
       <p>第 <i>j</i> 束光的每次吸收向原子传递动量 ℏ<b>k</b><sub>j</sub>。各束贡献相加得到平均光力 <b>F</b> = ∑<sub>j</sub> ℏ<b>k</b><sub>j</sub><i>R</i><sub>j</sub>，其中 <i>R</i><sub>j</sub> 为该束光在当前时刻的散射率。相向光束的散射率之差决定原子受到的恢复力与速度阻尼。轨迹积分另计重力。启用随机反冲时，蓝光用动量扩散近似，绿光逐个抽样吸收和自发辐射事件。</p>
+      <p>每次 399 nm 自发衰变经级联进入 ³P₀、³P₂ 的概率分别为 3.38 × 10⁻⁸ 和 2.02 × 10⁻⁹。每次 556 nm 自发衰变经磁偶极跃迁进入 ³P₀ 的概率估计为 5.54 × 10⁻⁹。模型根据每个原子的实际散射率抽取进入暗态的时刻。无再泵浦时，该原子随后退出亮态计数与荧光计算。<a href="./METHOD.md">分支比来源与计算方法</a></p>
       <p>这个准稳态散射率模型省略了能级之间的相干演化、保守光偶极梯度力和原子之间的散射光再吸收。</p>
     </details>
     <details class="sequence-method"><summary>论文参数、时序假设与模型</summary>
@@ -188,11 +196,13 @@ struct Apparatus {
   peak: vec4f,            // 装载时蓝光（斜、水平）及绿光（斜、水平）
   detuning: vec4f,        // 蓝光、绿光装载、接收、压缩的归一化失谐 2Δ/Γ
   gradientsRamp: vec4f,   // 装载、接收、压缩末端的梯度及绿光功率波形
+  branches: vec4f,        // 蓝光到 ³P₀、³P₂ 及绿光到 ³P₀ 的每次衰变分支比
 }
 struct Atom {
   pos: vec3f, live: u32,
   vel: vec3f, held: u32,
-  rng: u32, pad0: u32, pad1: vec2u,
+  rng: u32, branchThreshold: f32, branchChoice: f32, darkChannel: u32,
+  opticalDepth: f32, depthCorrection: f32, padding: vec2u,
 }
 struct FramePlan {
   flags: vec4u,           // 起点光场阶段、帧末留存筛选
@@ -332,6 +342,25 @@ fn inside(pos: vec3f, vel: vec3f) -> bool {
   return dot(pos,pos)<0.003*0.003 && dot(vel,vel)<1.0;
 }
 
+fn advanceBranch(p: ptr<function,Atom>, r: Radiation, dt: f32) -> f32 {
+  let rates = vec3f(r.blueTotal,r.blueTotal,r.greenTotal)*lab.branches.xyz;
+  let total = rates.x+rates.y+rates.z;
+  if (total == 0.0) { return dt; }
+  // 从零累计光学深度并保留求和余量，微弱的绿光分支在单精度下仍有贡献。
+  let increment = total*dt-(*p).depthCorrection;
+  let previous = (*p).opticalDepth;
+  let next = previous+increment;
+  (*p).depthCorrection = (next-previous)-increment;
+  (*p).opticalDepth = next;
+  if (next < (*p).branchThreshold) { return dt; }
+  let mark = (*p).branchChoice*total;
+  if (mark < rates.z) { (*p).darkChannel=3u; }
+  else if (mark < rates.z+rates.x) { (*p).darkChannel=1u; }
+  else { (*p).darkChannel=2u; }
+  (*p).live=0u;
+  return clamp(((*p).branchThreshold-previous)/total,0.0,dt);
+}
+
 @compute @workgroup_size(32)
 fn advanceBatch(@builtin(global_invocation_id) invocation: vec3u) {
   let id = invocation.x;
@@ -349,9 +378,11 @@ fn advanceBatch(@builtin(global_invocation_id) invocation: vec3u) {
     let start = radiation(p.pos,p.vel,channels(plan.flags.x,u),axes,helicity);
     let midPos = p.pos+0.5*dt*p.vel; let midVel = p.vel+0.5*dt*start.acc;
     let mid = radiation(midPos,midVel,channels(plan.flags.x,u+0.5*plan.step.z),axes,helicity);
-    p.pos += dt*midVel; p.vel += dt*mid.acc;
-    if (lab.biasRecoil.w!=0.0) { p.vel += recoilKick(mid,dt,axes,&p.rng); }
-    if (dot(p.pos,p.pos)>0.15*0.15) { p.live=0u; }
+    let brightDT = advanceBranch(&p,mid,dt);
+    p.pos += brightDT*(p.vel+0.5*brightDT*start.acc);
+    p.vel += brightDT*mid.acc;
+    if (lab.biasRecoil.w!=0.0) { p.vel += recoilKick(mid,brightDT,axes,&p.rng); }
+    if (dot(p.pos,p.pos)>0.15*0.15) { p.live=0u; p.darkChannel=0u; }
     if (step+1u>=batch.heldFrom && !inside(p.pos,p.vel)) { p.held=0u; }
   }
   if (batch.finishFrame!=0u) {
@@ -363,7 +394,7 @@ fn advanceBatch(@builtin(global_invocation_id) invocation: vec3u) {
       rates = vec2f(r.blueTotal,r.greenTotal);
     }
     history[batch.pageFrame*n+id] = OutputSample(vec4f(p.pos,f32(p.live)),
-      vec4f(p.vel,f32(p.live!=0u && inside(p.pos,p.vel))),vec4f(rates,0.0,0.0));
+      vec4f(p.vel,f32(p.live!=0u && inside(p.pos,p.vel))),vec4f(rates,f32(p.darkChannel),0.0));
   }
   particles[id] = p;
 }

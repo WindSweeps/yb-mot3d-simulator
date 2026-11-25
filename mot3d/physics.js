@@ -1,15 +1,24 @@
+import { BLUE_DECAY_RATE, DARK_BRANCHES, EMISSION_BRANCHES, branchDraws } from './branching.js';
+
 /** 174Yb J=0 -> J'=1, six travelling waves; SI internally. See METHOD.md. */
 export const CONSTANTS = Object.freeze({
   h: 6.62607015e-34, hbar: 6.62607015e-34 / (2 * Math.PI),
   kB: 1.380649e-23, c: 299792458, muB: 9.2740100657e-24,
   mass: 173.93886755 * 1.66053906892e-27,
-  wavelength: 399e-9, gamma: 2 * Math.PI * 29.13e6, gravity: 9.80665,
+  wavelength: 399e-9, gamma: BLUE_DECAY_RATE, gravity: 9.80665,
 });
 const C = CONSTANTS, K = 2 * Math.PI / C.wavelength;
 const RECOIL = C.hbar * K / C.mass;
 export const BLUE_TRANSITION = Object.freeze({ k: K, gamma: C.gamma, lande: 1, recoil: RECOIL });
 const ISAT = Math.PI * C.h * C.c * C.gamma / (3 * C.wavelength ** 3);
 const SQ3 = Math.sqrt(3) / 2;
+const blueDarkProbability = DARK_BRANCHES.blueP0 + DARK_BRANCHES.blueP2;
+
+// 暗态抽样独立于反冲随机数。1 表示 ³P₀，2 表示 ³P₂。
+export function sampleBlueBranch(seed, atomIndex) {
+  const {threshold, choice} = branchDraws(seed, atomIndex);
+  return {photonBudget:threshold / blueDarkProbability, target:choice * blueDarkProbability < DARK_BRANCHES.blueP0 ? 1 : 2};
+}
 export const BEAM_DIRECTIONS = Object.freeze([
   [SQ3, 0, .5], [-SQ3, 0, -.5], [-SQ3, 0, .5], [SQ3, 0, -.5], [0, 1, 0], [0, -1, 0],
 ].map(Object.freeze));
@@ -194,66 +203,83 @@ export function simulate(input = {}, options = {}) {
   const framePhotons = new Float32Array(frameCount*n);
   const times = Float64Array.from({ length: frameCount }, (_, i) => duration*i/(frameCount-1));
   const finalPositions = new Float64Array(n*3), finalVelocities = new Float64Array(n*3);
-  const alive = new Uint8Array(n), retained = new Uint8Array(n);
+  const alive = new Uint8Array(n), retained = new Uint8Array(n), darkState = new Uint8Array(n);
   const out = new Float64Array(9), mid = new Float64Array(9), s = new Float64Array(6);
   for (let i=0;i<n;i++) {
     let [x,y,z,vx,vy,vz] = initial.subarray(i*6,i*6+6), nextFrame = 1, live = true, held = true;
-    let emittedPhotons = 0;
+    let integratedScattering = 0;
+    const branch = sampleBlueBranch(p.seed, i);
     const rng = random((p.seed ^ Math.imul(i+1, 0x9E3779B1) ^ 0xA341316C) >>> 0);
     frames.set([x,y,z], i*3); frameAlive[i] = 1;
     if (holdStart === 0 && (Math.hypot(x,y,z)>=radius || Math.hypot(vx,vy,vz)>=speedLimit)) held = false;
     for (let step=0;step<steps;step++) {
       const time = (step+1)*dt, oldX=x,oldY=y,oldZ=z;
-      let stepPhotons = 0;
+      let stepScattering = 0, brightFraction = 1, entersDark = false;
       if (live) {
         evaluate(x,y,z,vx,vy,vz,c,out,s);
         const hx=x+.5*dt*vx,hy=y+.5*dt*vy,hz=z+.5*dt*vz;
         const hvx=vx+.5*dt*out[0],hvy=vy+.5*dt*out[1],hvz=vz+.5*dt*(out[2]+c.gravityZ);
         evaluate(hx,hy,hz,hvx,hvy,hvz,c,mid,s);
         const totalRate = (mid[3]+mid[4]) + (mid[5]+mid[6]) + (mid[7]+mid[8]);
-        stepPhotons = totalRate * dt;
-        x += dt*hvx; y += dt*hvy; z += dt*hvz;
-        vx += dt*mid[0]; vy += dt*mid[1]; vz += dt*(mid[2]+c.gravityZ);
+        const fullStepScattering = totalRate * dt;
+        const remaining = branch.photonBudget - integratedScattering;
+        if (fullStepScattering > 0 && fullStepScattering >= remaining) {
+          entersDark = true;
+          brightFraction = Math.max(0, remaining) / fullStepScattering;
+        }
+        const brightDt = dt * brightFraction;
+        stepScattering = totalRate * brightDt;
+        x += brightDt*(vx+.5*brightDt*out[0]);
+        y += brightDt*(vy+.5*brightDt*out[1]);
+        z += brightDt*(vz+.5*brightDt*(out[2]+c.gravityZ));
+        vx += brightDt*mid[0]; vy += brightDt*mid[1]; vz += brightDt*(mid[2]+c.gravityZ);
         if (p.recoil) {
           // Independent absorption shot noise along each beam pair plus isotropic emission.
           for (let pair=0;pair<3;pair++) {
             const rate = mid[3+2*pair]+mid[4+2*pair];
-            const kick = RECOIL*Math.sqrt(rate*dt)*rng.normal(), d=BEAM_DIRECTIONS[2*pair];
+            const kick = RECOIL*Math.sqrt(rate*brightDt)*rng.normal(), d=BEAM_DIRECTIONS[2*pair];
             vx += kick*d[0]; vy += kick*d[1]; vz += kick*d[2];
           }
-          const emission = RECOIL*Math.sqrt(stepPhotons/3);
+          const emission = RECOIL*Math.sqrt(stepScattering/3);
           vx += emission*rng.normal(); vy += emission*rng.normal(); vz += emission*rng.normal();
         }
-        if (Math.hypot(x,y,z)>domainRadius || !Number.isFinite(vx+vy+vz+x+y+z)) live = false;
+        const inDomain = Math.hypot(x,y,z) <= domainRadius && Number.isFinite(vx+vy+vz+x+y+z);
+        entersDark = entersDark && inDomain;
+        if (entersDark) darkState[i] = branch.target;
+        live = inDomain && !entersDark;
         if (time >= holdStart-1e-15 && (!live || Math.hypot(x,y,z)>=radius || Math.hypot(vx,vy,vz)>=speedLimit)) held = false;
       }
       while (nextFrame < frameCount && times[nextFrame] <= time+1e-14) {
         const f = Math.max(0, Math.min(1, (times[nextFrame]-(time-dt))/dt)), o=(nextFrame*n+i)*3;
-        frames[o] = oldX+f*(x-oldX); frames[o+1] = oldY+f*(y-oldY); frames[o+2] = oldZ+f*(z-oldZ);
-        framePhotons[nextFrame*n+i] = emittedPhotons + f*stepPhotons;
-        frameAlive[nextFrame*n+i] = live ? 1 : 0; nextFrame++;
+        const progress = brightFraction > 0 ? Math.min(1, f / brightFraction) : 0;
+        frames[o] = oldX+progress*(x-oldX); frames[o+1] = oldY+progress*(y-oldY); frames[o+2] = oldZ+progress*(z-oldZ);
+        framePhotons[nextFrame*n+i] = (integratedScattering + progress*stepScattering) * EMISSION_BRANCHES.blue399;
+        frameAlive[nextFrame*n+i] = Number(live || (entersDark && f < brightFraction)); nextFrame++;
       }
-      emittedPhotons += stepPhotons;
+      integratedScattering += stepScattering;
     }
     finalPositions.set([x,y,z],i*3); finalVelocities.set([vx,vy,vz],i*3);
     alive[i] = live ? 1 : 0; retained[i] = live && held ? 1 : 0;
   }
   return finishSimulation(c, initial, {
-    n, frameCount, frames, frameAlive, framePhotons, times, finalPositions, finalVelocities, alive, retained,
+    n, frameCount, frames, frameAlive, framePhotons, times, finalPositions, finalVelocities, alive, retained, darkState,
   }, started);
 }
 
 export function finishSimulation(c, initial, output, started) {
   const p = c.params;
-  const { n, finalPositions, finalVelocities, alive, retained } = output;
+  const { n, finalPositions, finalVelocities, alive, retained, darkState } = output;
   const hold = Math.min(.005, p.durationMS * 1e-3);
   const yaw = p.sourceYawDeg*Math.PI/180, pitch = p.sourcePitchDeg*Math.PI/180;
   const sourceDirection = [Math.cos(yaw)*Math.cos(pitch), Math.sin(yaw)*Math.cos(pitch), Math.sin(pitch)];
   const initialLongitudinalVelocities = Float64Array.from({length:n}, (_,i) =>
     sourceDirection.reduce((sum,d,a) => sum+d*initial[6*i+3+a],0));
   let count=0, validCount=0, allSpeed=0, capturedSpeed=0;
+  let darkP0=0, darkP2=0;
   const centroid=[0,0,0], moments=[0,0,0];
   for (let i=0;i<n;i++) {
+    if (darkState[i] === 1) darkP0++;
+    if (darkState[i] === 2) darkP2++;
     const speed = Math.hypot(...finalVelocities.subarray(i*3,i*3+3));
     if (alive[i]) { validCount++; allSpeed += speed; }
     if (!retained[i]) continue;
@@ -276,6 +302,7 @@ export function finishSimulation(c, initial, output, started) {
     summary:{ retained:count,retainedFraction:count/n,centroidMM:count?centroid:null,
       rmsMM:count?moments.map(v=>Math.sqrt(Math.max(0,v/count))):null,
       meanSpeed:count?capturedSpeed/count:null,allMeanSpeed:validCount?allSpeed/validCount:null,validCount,
+      darkP0, darkP2, escaped:n-validCount-darkP0-darkP2,
       initialLongitudinal:longitudinalStats(), retainedInitialLongitudinal:longitudinalStats(retained),
       zeroMM:c.derived.zeroMM,criterion:{radiusMM:3,speedMS:1,holdMS:hold*1000,center:'optical-origin'},
       elapsedMS:performance.now()-started } };

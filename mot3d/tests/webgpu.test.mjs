@@ -1,4 +1,5 @@
 import { createGpuSimulation } from '../gpu-simulation.js';
+import { checkBlueBranches } from './blue-branch-checks.mjs';
 import { DEFAULTS, derive, radiation, sampleInitialStates, simulate } from '../physics.js';
 
 function check(condition, message) {
@@ -122,13 +123,14 @@ export async function runShaderChecks(source, progress) {
     await checkBallistics(gpu);
     const optical = await checkOptics(gpu);
     const recoilMomentRatios = await checkRecoil(gpu);
+    const branches = await checkBlueBranches(gpu.run);
     progress('GPU ballistics, retention, optics and recoil passed');
     const timings = [];
     for (const n of [192, 768]) {
       timings.push(await benchmark(gpu, n));
       progress('Completed ' + n + ' atoms');
     }
-    return {setupMS, optical, recoilMomentRatios, timings};
+    return {setupMS, optical, recoilMomentRatios, branches, timings};
   } finally {
     gpu.destroy();
   }

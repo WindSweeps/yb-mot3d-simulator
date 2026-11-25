@@ -1,9 +1,10 @@
 import { BEAM_DIRECTIONS, BLUE_TRANSITION, CONSTANTS as C, compile, evaluate, random, sampleInitialStates } from './physics.js';
 import { compileSequence, sequenceAt } from './sequence.js';
 import { sequenceSamplingDiagnostics } from './sequence-diagnostics.js';
+import { branchDraws, DARK_BRANCHES, darkRate, GREEN_DECAY_RATE } from './branching.js';
 
 const greenK = 2 * Math.PI / 555.8e-9;
-export const GREEN_TRANSITION = Object.freeze({ k: greenK, gamma: 2 * Math.PI * 180000, lande: 1.5, recoil: C.hbar * greenK / C.mass });
+export const GREEN_TRANSITION = Object.freeze({ k: greenK, gamma: GREEN_DECAY_RATE, lande: 1.5, recoil: C.hbar * greenK / C.mass });
 const radius = .003, domain = .15;
 
 export function saturationIntensity(transition) {
@@ -145,6 +146,7 @@ function observationGrid(program) {
 
 function atomFrom(initial, i, seed) {
   return { p: initial.slice(6*i, 6*i+3), v: initial.slice(6*i+3, 6*i+6),
+    ...branchDraws(seed, i), depth:0, darkChannel:0,
     rng: random((seed ^ Math.imul(i + 1, 0x9E3779B1) ^ 0xA341316C) >>> 0), live: true, held: true };
 }
 
@@ -194,14 +196,18 @@ export function prepareSequenceRun(input, config, options = {}) {
     });
     if (options.observeVelocity) result.velocitiesMS = new Float32Array(samples * 3);
   }
-  return {model, field, program, grid, loadEnd, initial, result};
+  // 短装载时捕获检查点也是光场切换点；计算驻留云泄漏率须取装载侧光场。
+  const loadingRadiation = loadEnd === program.stages[0].endMS
+    ? prepareSequenceRadiation(model.params, sequenceAt(program, 0)) : null;
+  return {model, field, program, grid, loadEnd, loadingRadiation, initial, result};
 }
 
 function frameMoments() {
-  return {count:0, live:0, mean:new Float64Array(6), delta:new Float64Array(6), scatter:new Float64Array(36)};
+  return {count:0, live:0, dark:[0,0,0,0], rateSum:0, loadRateSum:0,
+    mean:new Float64Array(6), delta:new Float64Array(6), scatter:new Float64Array(36)};
 }
 
-function writeAtom(result, k, pos, offsetP, vel, offsetV, live, trapped, blueRate, greenRate, m) {
+function writeAtom(result, k, pos, offsetP, vel, offsetV, live, trapped, blueRate, greenRate, m, darkChannel, loadingRadiation) {
   k -= (result.firstRecordedFrame ?? 0) * result.n;
   if (result.positionsM && k >= 0 && k < result.alive.length) {
     result.positionsM[3*k] = pos[offsetP];
@@ -219,9 +225,17 @@ function writeAtom(result, k, pos, offsetP, vel, offsetV, live, trapped, blueRat
       result.trapped[k] = Number(trapped);
     }
   }
-  if (!live) return;
+  if (!live) {
+    m.dark[darkChannel]++;
+    return;
+  }
   m.live++;
   if (!trapped) return;
+  m.rateSum += darkRate(blueRate, greenRate);
+  if (loadingRadiation) {
+    const radiation = loadingRadiation(pos.subarray(offsetP,offsetP+3), vel.subarray(offsetV,offsetV+3));
+    m.loadRateSum += darkRate(radiation.blueRate, radiation.greenRate);
+  }
   const count = ++m.count;
   for (let axis = 0; axis < 3; axis++) {
     m.delta[axis] = pos[offsetP + axis] - m.mean[axis];
@@ -263,6 +277,9 @@ function phaseSpaceDensityPerAtom(count, scatter) {
 function finishFrame(run, frame, m) {
   const {count, mean, scatter} = m, checkpoint = run.grid[frame].checkpoint;
   if (checkpoint) run.result.summary[checkpoint] = m.live;
+  const branchLossRate = count ? m.rateSum / count : 0;
+  if (checkpoint === 'N0')
+    run.result.loadBranchLossRate = run.loadingRadiation && count ? m.loadRateSum / count : branchLossRate;
   const width = scatter[0] + scatter[7] + scatter[14];
   const thermal = scatter[21] + scatter[28] + scatter[35];
   let sampleCovariance = null;
@@ -273,7 +290,8 @@ function finishFrame(run, frame, m) {
       sampleCovariance[entry++] = scatter[6*row + col] / (count - 1);
   }
   run.result.metrics.push({
-    count, centroidMM:count ? [1000*mean[0], 1000*mean[1], 1000*mean[2]] : null,
+    count, branchLossRate, darkBranches:{blueP0:m.dark[1], blueP2:m.dark[2], greenP0:m.dark[3]},
+    centroidMM:count ? [1000*mean[0], 1000*mean[1], 1000*mean[2]] : null,
     meanVelocityMS:count ? [mean[3],mean[4],mean[5]] : null, sampleCovariance,
     rmsRadiusMM:count ? 1000*Math.sqrt(width/count) : null,
     temperatureUK:count > 1 ? C.mass*Math.max(0,thermal)*1e6/(3*C.kB*(count-1)) : null,
@@ -290,14 +308,19 @@ export function writeSequenceGPUFrames(run, data, firstFrame, frameCount) {
   let liveCount;
   for (let f = firstFrame; f < firstFrame + frameCount; f++) {
     const m = frameMoments();
+    const loadingRadiation = run.grid[f].checkpoint === 'N0' ? run.loadingRadiation : null;
     for (let i = 0; i < result.n; i++) {
       const offset = 12 * ((f - firstFrame) * result.n + i);
       const live = data[offset+3], trapped = data[offset+7];
       const blueRate = data[offset+8], greenRate = data[offset+9];
+      const darkChannel = data[offset+10];
+      if (!Number.isInteger(darkChannel) || darkChannel < 0 || darkChannel > 3 ||
+          (darkChannel && (live || blueRate || greenRate))) throw new Error('GPU 暗态与散射记录不一致。');
       if (!Number.isFinite(data[offset]+data[offset+1]+data[offset+2]+data[offset+4]+data[offset+5]+
           data[offset+6]+blueRate+greenRate) || blueRate < 0 || greenRate < 0 || (live !== 0 && live !== 1) ||
           (trapped !== 0 && trapped !== 1) || trapped > live) throw new Error('GPU 时序帧的相空间、散射率或留存标记无效。');
-      writeAtom(result, f*result.n + i, data, offset, data, offset+4, live, trapped, blueRate, greenRate, m);
+      writeAtom(result, f*result.n + i, data, offset, data, offset+4, live, trapped, blueRate, greenRate, m,
+        darkChannel, loadingRadiation);
     }
     finishFrame(run, f, m);
     liveCount = m.live;
@@ -308,6 +331,12 @@ export function writeSequenceGPUFrames(run, data, firstFrame, frameCount) {
 export function finishSequenceRun(run, started) {
   if (run.result.metrics.length !== run.result.frameCount) throw new Error('时序输出帧不完整。');
   run.result.samplingDiagnostics = sequenceSamplingDiagnostics(run.result.n, run.result.summary);
+  run.result.samplingDiagnostics.branchProbabilities = DARK_BRANCHES;
+  run.result.samplingDiagnostics.loadBranchLossRate = run.result.loadBranchLossRate;
+  for (const [frame, point] of run.grid.entries()) {
+    if (point.checkpoint)
+      run.result.samplingDiagnostics.stages[point.checkpoint].cumulativeDarkBranches = run.result.metrics[frame].darkBranches;
+  }
   return Object.assign(run.result, run.result.summary, {elapsedMS:performance.now()-started});
 }
 
@@ -324,10 +353,11 @@ export function simulateSequence(input, config, options = {}) {
   function frame(f) {
     configure(first, sequenceAt(program, grid[f].time));
     const m = frameMoments();
+    const loadingRadiation = grid[f].checkpoint === 'N0' ? run.loadingRadiation : null;
     for (let i = 0; i < n; i++) {
-      const {p, v, live} = atoms[i], k = f*n + i;
+      const {p, v, live, darkChannel} = atoms[i], k = f*n + i;
       if (live) scattering(p, v, first, s);
-      writeAtom(result,k,p,0,v,0,live,live && inside(p,v),s.blueRate,s.greenRate,m);
+      writeAtom(result,k,p,0,v,0,live,live && inside(p,v),s.blueRate,s.greenRate,m,darkChannel,loadingRadiation);
     }
     finishFrame(run,f,m);
   }
@@ -350,10 +380,24 @@ export function simulateSequence(input, config, options = {}) {
         scattering(p, v, first, s);
         for (let a=0; a<3; a++) { hp[a]=p[a]+.5*dt*v[a]; hv[a]=v[a]+.5*dt*s.acceleration[a]; }
         scattering(hp, hv, middle, s);
-        for (let a=0; a<3; a++) { p[a] += dt*hv[a]; v[a] += dt*s.acceleration[a]; }
-        if (model.params.recoil) recoil(v, dt, s, atom.rng);
+        const rate = darkRate(s.blueRate, s.greenRate);
+        let brightTime = dt;
+        if (rate > 0 && atom.depth + dt*rate >= atom.threshold) {
+          brightTime = Math.min(dt, Math.max(0,(atom.threshold - atom.depth) / rate));
+          const mark = atom.choice * rate, greenP0 = s.greenRate * DARK_BRANCHES.greenP0;
+          atom.darkChannel = mark < greenP0 ? 3 : mark < greenP0 + s.blueRate * DARK_BRANCHES.blueP0 ? 1 : 2;
+        }
+        atom.depth += brightTime * rate;
+        for (let a=0; a<3; a++) {
+          const midpointVelocity = atom.darkChannel ? v[a] + (hv[a]-v[a])*(brightTime/dt) : hv[a];
+          p[a] += brightTime*midpointVelocity;
+          v[a] += brightTime*s.acceleration[a];
+        }
+        if (model.params.recoil && brightTime > 0) recoil(v, brightTime, s, atom.rng);
         if (!Number.isFinite(p[0]+p[1]+p[2]+v[0]+v[1]+v[2])) throw new Error('时序积分出现非有限相空间。');
-        if (p[0]*p[0]+p[1]*p[1]+p[2]*p[2] > domain*domain) {
+        const outside = p[0]*p[0]+p[1]*p[1]+p[2]*p[2] > domain*domain;
+        if (outside || atom.darkChannel) {
+          if (outside) atom.darkChannel = 0;
           atom.live = false;
           if (--liveCount === 0) return;
         }

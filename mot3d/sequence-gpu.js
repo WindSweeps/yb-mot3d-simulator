@@ -1,8 +1,9 @@
 import { BEAM_DIRECTIONS, CONSTANTS, HELICITIES } from './physics.js';
+import { DARK_BRANCHES, branchDraws } from './branching.js';
 import { sequenceAt } from './sequence.js';
 import { prepareSequenceRun, writeSequenceGPUFrames, finishSequenceRun } from './sequence-physics.js';
 
-const atomBytes = 48, frameAtomBytes = 48, planBytes = 64;
+const atomBytes = 64, frameAtomBytes = 48, planBytes = 64;
 const batchBytes = 24;
 const historyPageBytes = 12 * 1024 * 1024;
 const maxStepsPerDispatch = 96, maxDispatchesPerSubmit = 32, particleStepBudget = 2 * 1024 * 1024;
@@ -26,6 +27,7 @@ function packApparatus({model,field,program}) {
     normalizedMHzFactor*load.blueDetuningMHz/blue.transition.gamma, normalizedMHzFactor*load.greenDetuningMHz/green.transition.gamma,
     normalizedMHzFactor*receive.greenDetuningMHz/green.transition.gamma, normalizedMHzFactor*final.greenDetuningMHz/green.transition.gamma,
     load.gradientGCM, receive.gradientGCM, final.gradientGCM, ['linear','smooth','geometric'].indexOf(c.powerRamp ?? 'linear'),
+    DARK_BRANCHES.blueP0, DARK_BRANCHES.blueP2, DARK_BRANCHES.greenP0, 0,
   ]);
 }
 
@@ -33,11 +35,13 @@ function packAtoms({model,initial}) {
   const {n,seed} = model.params;
   const buffer = new ArrayBuffer(atomBytes*n), floats = new Float32Array(buffer), flags = new Uint32Array(buffer);
   for (let i=0; i<n; i++) {
-    const k = i*12;
+    const k = i*(atomBytes/4), {threshold,choice} = branchDraws(seed,i);
     floats.set(initial.subarray(6*i,6*i+3),k);
     floats.set(initial.subarray(6*i+3,6*i+6),k+4);
     flags[k+3] = flags[k+7] = 1;
     flags[k+8] = seed ^ Math.imul(i+1,0x9E3779B1) ^ 0xA341316C;
+    floats[k+9] = threshold;
+    floats[k+10] = Math.min(choice,1-2**-24);
   }
   return buffer;
 }
@@ -140,7 +144,7 @@ async function integrate(device,pipeline,layout,input,config,options) {
 }
 
 export async function createSequenceGpu(source) {
-  if (source.includes('fn advance(')) throw new Error('网页已更新，请刷新后重新计算。');
+  if (!source.includes('fn advanceBranch(')) throw new Error('网页已更新，请刷新后重新计算。');
   if (!navigator.gpu) return null;
   let adapter;
   try { adapter = await navigator.gpu.requestAdapter(); }

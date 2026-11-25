@@ -1,6 +1,6 @@
 import { sequenceAt } from './sequence.js';
 
-// Li 等表 II 的总原子数拟合；β 的单位为每原子每秒。
+// Li 等表 II 给出总单体损失和双体损失，β 的单位为每原子每秒。
 const lossRates = {
   blue:     { load: [1.3, 27e-9],   hold: [.54, 44e-9] },
   green:    { load: [.012, 0],      hold: [.012, 0] },
@@ -10,19 +10,28 @@ const lossRates = {
 };
 
 export function sequenceLossStages(program, settings = {}) {
+  const alphaMode = settings.alphaMode ?? 'background';
+  if (!['background', 'total'].includes(alphaMode)) throw new RangeError('未知的单体损失系数定义。');
   return program.stages.map(({id, startMS, durationMS}) => {
     // 中点避开关断瞬间及压缩斜坡端点，区分实际有光与开关开启但功率为零。
     const channels = sequenceAt(program, startMS + durationMS / 2);
     const blue = channels.bluePowersMW.some(power => power > 0);
     const green = channels.greenPowersMW.some(power => power > 0);
     const light = blue ? (green ? 'twoColor' : 'blue') : (green ? 'green' : 'dark');
-    const [defaultAlpha, defaultBeta] = lossRates[light][id === 'load' ? 'load' : 'hold'];
-    const alpha = settings[id === 'load' ? 'alpha' : id + 'Alpha'] ?? defaultAlpha;
+    const [referenceTotal, defaultBeta] = lossRates[light][id === 'load' ? 'load' : 'hold'];
+    const alpha = settings[id === 'load' ? 'alpha' : id + 'Alpha'] ?? (alphaMode === 'total' ? referenceTotal : .012);
     const beta = settings[id === 'load' ? 'beta' : id + 'Beta'] ?? defaultBeta;
     if (![alpha, beta].every(value => Number.isFinite(value) && value >= 0))
       throw new RangeError('损失系数必须是有限的非负数。');
-    return {id, light, alpha, beta};
+    return {id, light, alphaMode, alpha, beta};
   });
+}
+
+function effectiveLoss(stage, branchLossRate) {
+  if (!Number.isFinite(branchLossRate) || branchLossRate < 0)
+    throw new RangeError('分支损失率必须是有限的非负数。');
+  const background = stage.alphaMode === 'total' ? Math.max(0, stage.alpha - branchLossRate) : stage.alpha;
+  return {background, branchLossRate, alpha:background + branchLossRate, beta:stage.beta};
 }
 
 // 把 ms 换算成 s 时先缩小较大的因子，保留极短装载时间的有效数字。
@@ -130,10 +139,12 @@ export function sequencePopulation(program, result, settings) {
   }
   const stages = sequenceLossStages(program, settings).map((rates, i) => ({...program.stages[i], ...rates}));
   const load = stages[0];
+  // 驻留云持续散射。入口轨迹中的暗态损失已经计入捕获概率。
+  const loadLoss = effectiveLoss(load, result.loadBranchLossRate);
   const p = captured / incident;
   const loadingRate = flux * p;
-  const steadyState = loadingSteadyState(loadingRate, load.alpha, load.beta);
-  const loaded = loadPopulation(load.durationMS, flux, p, load.alpha, load.beta);
+  const steadyState = loadingSteadyState(loadingRate, loadLoss.alpha, load.beta);
+  const loaded = loadPopulation(load.durationMS, flux, p, loadLoss.alpha, load.beta);
   // 在精确的物理阶段边界和观察帧上分段。帧内沿用左端阱内计数，与成像一致。
   const starts = new Set(stages.slice(1).map(stage => stage.startMS));
   for (const time of timesMS)
@@ -147,7 +158,8 @@ export function sequencePopulation(program, result, settings) {
     while (frame + 1 < timesMS.length && timesMS[frame + 1] <= start) frame++;
     while (stage + 1 < stages.length && stages[stage].endMS <= start) stage++;
     const count = timesMS[frame] < load.endMS ? captured : metrics[frame].count;
-    const {alpha, beta} = stages[stage];
+    // 关源后暗态跃迁已经改变存留轨迹数，每条亮态轨迹的权重只积分其余损失。
+    const {background:alpha, beta} = effectiveLoss(stages[stage], metrics[frame].branchLossRate);
     intervals.push({start, count, weight, alpha, beta});
     weight = holdWeight(weight, count, boundaries[i + 1] - start, alpha, beta);
   }
@@ -155,21 +167,24 @@ export function sequencePopulation(program, result, settings) {
   function weightAt(timeMS, trapped) {
     if (!Number.isFinite(timeMS) || timeMS < 0) throw new RangeError('时序时间必须为有限的非负数。');
     if (timeMS < load.endMS)
-      return trapped > 0 ? loadPopulation(timeMS, flux, p, load.alpha, load.beta) / trapped : 0;
+      return trapped > 0 ? loadPopulation(timeMS, flux, p, loadLoss.alpha, load.beta) / trapped : 0;
     if (timeMS >= program.durationMS) return finalWeight;
     const interval = intervals.findLast(row => row.start <= timeMS);
     return holdWeight(interval.weight, interval.count, timeMS - interval.start, interval.alpha, interval.beta);
   }
   function at(timeMS, trapped) {
-    if (timeMS < load.endMS) return loadPopulation(timeMS, flux, p, load.alpha, load.beta);
+    if (timeMS < load.endMS) return loadPopulation(timeMS, flux, p, loadLoss.alpha, load.beta);
     return weightAt(timeMS, trapped) * trapped;
   }
   function timeConstants() {
     return {
-      loading:loadingTimeConstant(loadingRate, load.alpha, load.beta),
+      loading:loadingTimeConstant(loadingRate, loadLoss.alpha, load.beta),
       loss:lossTimeConstant(intervals, program.durationMS, finalWeight, metrics.at(-1).count, loaded),
     };
   }
-  return {at, weightAt, loaded, timeConstants, loadingRate, steadyState,
+  function lossAt(stageIndex, frame) {
+    return effectiveLoss(stages[stageIndex], metrics[frame].branchLossRate);
+  }
+  return {at, weightAt, loaded, timeConstants, loadingRate, steadyState, lossAt,
     estimatedAtoms: {N0:loaded, N1:at(program.checkpointTimesMS[1], N1), N2:finalWeight * N2}};
 }

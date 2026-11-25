@@ -386,7 +386,7 @@ function showMetrics() {
   $("#empty-note").hidden = summary.retained !== 0;
   $("#cloud-view").disabled = !summary.centroidMM;
   const criterion = summary.criterion;
-  if (criterion) $("#criterion-current").textContent = "以光束交点为原点，末 " + format(criterion.holdMS, 1) + " ms 持续满足 r < " + criterion.radiusMM + " mm、速率 < " + criterion.speedMS + " m/s。";
+  if (criterion) $("#criterion-current").textContent = "以光束交点为原点，末 " + format(criterion.holdMS, 1) + " ms 持续满足 r < " + criterion.radiusMM + " mm、速率 < " + criterion.speedMS + " m/s。全体入射轨迹中，" + summary.darkP0 + " 条进入 ³P₀，" + summary.darkP2 + " 条进入 ³P₂，" + summary.escaped + " 条越出计算边界。";
   const elapsed = summary.workerRoundTripMS;
   $("#compute-time").textContent = Number.isFinite(elapsed) ? "计算耗时 " + (elapsed < 1000 ? format(elapsed, 0) + " ms" : format(elapsed / 1000, 2) + " s") : "";
   updateComparison();

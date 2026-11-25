@@ -28,20 +28,28 @@ for (const t of [0, 4999.99, 5000, 5050, 5099.99, 5100]) {
   assert.equal(radiation.greenRate, 0);
 }
 assert.deepEqual(sequenceLossStages(plan).map(s => [s.light,s.alpha,s.beta]),
-  [['blue',1.3,27e-9], ['blue',.54,44e-9]]);
+  [['blue',.012,27e-9], ['blue',.012,44e-9]]);
 const testFlux = 9.8e7;
 const run = simulateSequence({...params, n:2}, config, {initialStates:[0,0,0,0,0,0, .00015,0,0,0,0,0]});
-assert.deepEqual(run.summary, {N0:2,N1:2,N2:2});
+assert.equal(run.N0, 2);
+assert.equal(run.metrics.at(-1).count + run.metrics.at(-1).darkBranches.blueP0 + run.metrics.at(-1).darkBranches.blueP2, 2);
 assert.ok(run.greenRates.every(rate => rate === 0));
-assert.ok(run.blueRates.every(rate => rate > 0));
+assert.ok(run.blueRates.every((rate,index) => run.alive[index] ? rate > 0 : rate === 0));
 const {N0, N1, N2} = sequencePopulation(plan, run, {flux:testFlux}).estimatedAtoms;
-// 从装载结束开始按论文式 (3) 演化，分别核对保持中点与终点。
-for (const [t, atoms] of [[.05,N1],[.1,N2]]) {
-  const expected = .54*N0 / ((.54+44e-9*N0)*Math.exp(.54*t)-44e-9*N0);
-  assert.ok(Math.abs(atoms/expected-1) < 1e-12);
+// 解析积分 1/w 的线性方程。进入暗态的原子在记录跃迁的帧上退出计数。
+for (const [i, atoms] of [[1,N1],[2,N2]]) {
+  const end = plan.checkpointTimesMS[i], alpha = .012, beta = 44e-9;
+  let integral = 0;
+  for (let frame = run.timesMS.indexOf(config.loadMS); run.timesMS[frame] < end; frame++) {
+    const start = (run.timesMS[frame] - config.loadMS)/1000;
+    const seconds = (run.timesMS[frame+1] - run.timesMS[frame])/1000;
+    integral += run.metrics[frame].count * Math.exp(-alpha*start) * -Math.expm1(-alpha*seconds) / alpha;
+  }
+  const weight = Math.exp(-alpha*(end-config.loadMS)/1000) / (run.N0/N0 + beta*integral);
+  assert.ok(Math.abs(atoms - run.summary['N'+i]*weight) <= 1e-12*N0);
 }
 const noHoldLoss = sequencePopulation(plan, run, {flux:testFlux,holdAlpha:0,holdBeta:0});
-assert.deepEqual(noHoldLoss.estimatedAtoms, {N0,N1:N0,N2:N0});
+assert.deepEqual(noHoldLoss.estimatedAtoms, {N0,N1:N0*run.N1/run.N0,N2:N0*run.N2/run.N0});
 
 // 无光无重力时位置随时间线性变化。较快的轨迹在保持中点之后穿出 3 mm 捕获半径。
 const darkHold = {...config, loadMS:.1, holdMS:3000, blueEnabled:false};

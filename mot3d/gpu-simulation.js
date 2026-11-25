@@ -1,8 +1,9 @@
 import {
-  BEAM_DIRECTIONS, CONSTANTS, HELICITIES, compile, finishSimulation, sampleInitialStates,
+  BEAM_DIRECTIONS, CONSTANTS, HELICITIES, compile, finishSimulation, sampleInitialStates, sampleBlueBranch,
 } from './physics.js';
+import { EMISSION_BRANCHES } from './branching.js';
 
-const ATOM_WORDS = 12;
+const ATOM_WORDS = 16;
 const ATOM_BYTES = ATOM_WORDS * 4;
 const CHUNK_BYTES = 16;
 const WORKGROUP_SIZE = 32;
@@ -41,6 +42,9 @@ function writeInitialAtoms(device, buffer, params, initial, checkInitialHold, fr
     flags[offset + 7] = Number(!checkInitialHold || (Math.hypot(...position) < .003 && Math.hypot(...velocity) < 1));
     flags[offset + 8] = params.seed ^ Math.imul(i + 1, 0x9E3779B1) ^ 0xA341316C;
     flags[offset + 9] = 1;
+    const branch = sampleBlueBranch(params.seed, i);
+    floats[offset + 12] = branch.photonBudget;
+    flags[offset + 13] = branch.target;
   }
   device.queue.writeBuffer(buffer, 0, packed);
 }
@@ -54,13 +58,14 @@ function readOutput(mapped, n, frameCount, duration) {
     frames[3 * i] = history[4 * i];
     frames[3 * i + 1] = history[4 * i + 1];
     frames[3 * i + 2] = history[4 * i + 2];
-    framePhotons[i] = history[4 * i + 3];
+    framePhotons[i] = history[4 * i + 3] * EMISSION_BRANCHES.blue399;
   }
 
   const finalPositions = new Float64Array(3 * n);
   const finalVelocities = new Float64Array(3 * n);
   const alive = new Uint8Array(n);
   const retained = new Uint8Array(n);
+  const darkState = new Uint8Array(n);
   const floats = new Float32Array(mapped, 0, n * ATOM_WORDS);
   const flags = new Uint32Array(mapped, 0, n * ATOM_WORDS);
   for (let i = 0; i < n; i++) {
@@ -71,10 +76,11 @@ function readOutput(mapped, n, frameCount, duration) {
     for (let frame = 0; frame < visibleFrames; frame++) frameAlive[frame * n + i] = 1;
     alive[i] = Number(visibleFrames === frameCount);
     retained[i] = alive[i] && flags[offset + 7];
+    darkState[i] = flags[offset + 14];
   }
 
   const times = Float64Array.from({ length: frameCount }, (_, i) => duration * i / (frameCount - 1));
-  return { n, frameCount, frames, frameAlive, framePhotons, times, finalPositions, finalVelocities, alive, retained };
+  return { n, frameCount, frames, frameAlive, framePhotons, times, finalPositions, finalVelocities, alive, retained, darkState };
 }
 
 async function integrate(device, pipeline, layout, input, options) {

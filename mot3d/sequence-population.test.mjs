@@ -36,12 +36,13 @@ near(loadPopulation(1, 1e308, 1, 1e-300, 0), 1e305);
 near(loadPopulation(1e-322, 1e308, 1, 0, 0), 1e305 * 1e-322);
 near(loadPopulation(100000, 1e308, 1, 1e308, 1e308), (Math.sqrt(5) - 1) / 2);
 const song = songSequence(), program = compileSequence(song);
-function coefficients(config) {
-  return sequenceLossStages(compileSequence({...song, ...config})).map(s => [s.light, s.alpha, s.beta]);
+function coefficients(config, alphaMode = 'background') {
+  return sequenceLossStages(compileSequence({...song, ...config}), {alphaMode}).map(s => [s.light, s.alpha, s.beta]);
 }
 const greenHold = ['green', .012, 0], dark = ['dark', .012, 0];
-assert.deepEqual(coefficients({}), [['twoColor', .53, 1.7e-9], ['twoColor', .21, 1e-9], greenHold, greenHold]);
-assert.deepEqual(coefficients({greenEnabled:false}), [['blue', 1.3, 27e-9], ['blue', .54, 44e-9], dark, dark]);
+assert.deepEqual(coefficients({}), [['twoColor', .012, 1.7e-9], ['twoColor', .012, 1e-9], greenHold, greenHold]);
+assert.deepEqual(coefficients({}, 'total'), [['twoColor', .53, 1.7e-9], ['twoColor', .21, 1e-9], greenHold, greenHold]);
+assert.deepEqual(coefficients({greenEnabled:false}), [['blue', .012, 27e-9], ['blue', .012, 44e-9], dark, dark]);
 assert.deepEqual(coefficients({blueEnabled:false}), [greenHold, greenHold, greenHold, greenHold]);
 assert.deepEqual(coefficients({blueEnabled:false, greenEnabled:false}), [dark, dark, dark, dark]);
 assert.deepEqual(coefficients({blueObliqueMW:0, blueHorizontalMW:0, greenObliqueMW:0, greenHorizontalMW:0}),
@@ -49,31 +50,47 @@ assert.deepEqual(coefficients({blueObliqueMW:0, blueHorizontalMW:0, greenOblique
 
 // 原点上无重力和反冲的原子在对称光场中静止，可逐阶段直接对照论文式 (2)、(3)。
 const params = {n:2, dtUS:20, gravity:false, recoil:false};
-const held = simulateSequence(params, song, {initialStates: [0,0,0,0,0,0, 0,0,0,0,0,0]});
+const centerStates = {initialStates: [0,0,0,0,0,0, 0,0,0,0,0,0]};
+const held = simulateSequence(params, song, centerStates);
 assert.deepEqual(held.summary, {N0:2, N1:2, N2:2});
-const loaded = loadPopulation(5000, 8.4e7, 1, .53, 1.7e-9);
+const loaded = loadPopulation(5000, 8.4e7, 1, .012 + held.loadBranchLossRate, 1.7e-9);
 // 用表 II 的装载率代入双色损失模型，与论文给出的稳态原子数比较。
 near(loadPopulation(60000, 8.4e7, 1, .53, 1.7e-9), 1.15e8, .01);
-near(loaded, 1.14165484e8, 1e-8);
+near(loadPopulation(5000, 8.4e7, 1, .53, 1.7e-9), 1.14165484e8, 1e-8);
 function equation3(initial, seconds, a, b) {
   if (a === 0) return initial / (1 + initial * b * seconds);
   return a * initial / (a * Math.exp(a * seconds) + b * initial * Math.expm1(a * seconds));
 }
-const transferred = equation3(loaded, .001, .21, 1e-9);
+const transferred = equation3(loaded, .001, .012, 1e-9);
 const received = transferred * Math.exp(-.012 * .010);
 const compressed = received * Math.exp(-.012 * .100);
 const population = sequencePopulation(program, held, {flux:8.4e7});
 near(population.loaded, loaded);
-near(population.at(5000.53, 2), equation3(loaded, .00053, .21, 1e-9));
+near(population.at(5000.53, 2), equation3(loaded, .00053, .012, 1e-9));
 near(population.at(5001, 2), transferred);
 near(population.estimatedAtoms.N1, received);
 near(population.estimatedAtoms.N2, compressed);
 near(population.weightAt(5111, 2) * 2, compressed);
 const onlyOne = sequencePopulation(program, held, {flux:8.4e7, handoffBeta:0});
-near(onlyOne.at(5001, 2), loaded * Math.exp(-.21 * .001));
+near(onlyOne.at(5001, 2), loaded * Math.exp(-.012 * .001));
 const onlyTwo = sequencePopulation(program, held, {flux:8.4e7, compressAlpha:0, compressBeta:2e-8});
 near(onlyTwo.estimatedAtoms.N2, equation3(received, .100, 0, 2e-8));
 assert.throws(() => sequencePopulation(program, held, {flux:8.4e7, greenAlpha:-1}), RangeError);
+assert.throws(() => sequenceLossStages(program, {alphaMode:'unknown'}), RangeError);
+
+// 旧文件给出含分支的总系数；关源后扣除每帧的分支期望，剩余背景以零为下限。
+const totalSettings = {flux:8.4e7, alphaMode:'total', alpha:2, beta:0, handoffAlpha:1, handoffBeta:0,
+  greenAlpha:0, greenBeta:0, compressAlpha:0, compressBeta:0};
+const totalPopulation = sequencePopulation(program, held, totalSettings);
+assert.ok(held.loadBranchLossRate > 0 && held.loadBranchLossRate < 2);
+near(totalPopulation.loaded, 8.4e7 * -Math.expm1(-2*5) / 2);
+let residualIntegral = 0;
+for (let f = held.timesMS.indexOf(song.loadMS); held.timesMS[f] < song.loadMS + song.handoffMS; f++) {
+  const h = held.metrics[f].branchLossRate;
+  residualIntegral += Math.max(0,1 - h) * (held.timesMS[f+1] - held.timesMS[f]) / 1000;
+}
+near(totalPopulation.estimatedAtoms.N2, totalPopulation.loaded * Math.exp(-residualIntegral));
+assert.equal(totalPopulation.lossAt(2, held.timesMS.indexOf(program.checkpointTimesMS[1])).background, 0);
 
 // 按真实入射冷束检查轨迹逃逸只在阱内计数处扣除；双体衰减可由 1/w 的时间积分独立检验。
 const run = simulateSequence({n:48, seed:399174}, song);
@@ -81,7 +98,7 @@ assert.ok(run.N0 > run.N2 && run.N2 > 0);
 const lossless = {flux:1e9, alpha:0, beta:0, handoffAlpha:0, handoffBeta:0, greenAlpha:0, greenBeta:0,
   compressAlpha:0, compressBeta:0};
 const withoutLoss = sequencePopulation(program, run, lossless);
-const initialWeight = 1e9 * 5 / run.n;
+const initialWeight = 1e9 * -Math.expm1(-5 * run.loadBranchLossRate) / (run.n * run.loadBranchLossRate);
 near(withoutLoss.estimatedAtoms.N0, run.N0 * initialWeight);
 near(withoutLoss.estimatedAtoms.N1, run.N1 * initialWeight);
 near(withoutLoss.estimatedAtoms.N2, run.N2 * initialWeight);
@@ -103,7 +120,10 @@ for (const [index, value] of [[0, -1], [1, Infinity], [2, -1], [2, 1.1], [3, NaN
 const inactive = {status:'empty', timeMS:null};
 assert.deepEqual(sequencePopulation(program, empty, {flux}).timeConstants(), {loading:inactive, loss:inactive});
 assert.deepEqual(sequencePopulation(program, held, {flux:0}).timeConstants(), {loading:inactive, loss:inactive});
-const constants = overrides => sequencePopulation(program, held, {...lossless,...overrides}).timeConstants();
+const darkSong = {...song, blueEnabled:false, greenEnabled:false};
+const darkHeld = simulateSequence(params, darkSong, centerStates);
+const darkProgram = compileSequence(darkSong);
+const constants = overrides => sequencePopulation(darkProgram, darkHeld, {...lossless,...overrides}).timeConstants();
 assert.deepEqual(constants({}), {loading:{status:'no-steady-state', timeMS:null}, loss:{status:'lower-bound', timeMS:111}});
 assert.deepEqual(constants({alpha:1e-310}).loading, {status:'out-of-range', timeMS:null});
 near(constants({alpha}).loading.timeMS, 1000/alpha);

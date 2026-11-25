@@ -216,7 +216,11 @@ test('光闸和成像波段以有效离散值试算，保留最佳相机信号',
   assert.equal(result.baseline, 0);
   assert.equal(result.bestExperiment.config.blueEnabled, true);
   assert.ok(result.bestValue > 0 && result.bestValue === Math.max(...attempts.map(([, , value]) => value)));
-  assert.ok(attempts.some(([on,band,value]) => on && band === '556' && value === 0));
+  const cascade = attempts.find(([on, band]) => on && band === '556');
+  assert.ok(cascade && cascade[2] > 0);
+  const direct = await scorer.evaluate({...experiment, config:{...config,blueEnabled:true}, imaging:{band:'399'}});
+  const expectedRatio = 5.25 / (2 * Math.PI * 29.13e6 - 6.18 - 5.25 - .37);
+  assert.ok(Math.abs(cascade[2] / direct.value / expectedRatio - 1) < 1e-9);
   scorer.destroy();
 });
 
@@ -250,9 +254,9 @@ test('双体损失在文献系数量级估计局部导数，未改动的空字�
 });
 
 test('光闸、各束功率和手动设置共同确定优化读数与原子数模型使用的损失系数', () => {
-  const dark = [.012,0], blueLoad = [1.3,27e-9], blueHold = [.54,44e-9];
+  const dark = [.012,0], blueLoad = [.012,27e-9], blueHold = [.012,44e-9];
   const cases = [
-    [songSequence(), [[.53,1.7e-9],[.21,1e-9],dark,dark]],
+    [songSequence(), [[.012,1.7e-9],[.012,1e-9],dark,dark]],
     [{...songSequence(),greenEnabled:false}, [blueLoad,blueHold,dark,dark]],
     [{...songSequence(),blueEnabled:false}, [dark,dark,dark,dark]],
     [{...songSequence(),blueEnabled:false,greenEnabled:false}, [dark,dark,dark,dark]],

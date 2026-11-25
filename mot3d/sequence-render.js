@@ -1,5 +1,6 @@
 import * as THREE from '../anatomy-demo/vendor/three-r160.module.js';
 import { BEAM_DIRECTIONS, BEAM_LABELS } from './physics.js';
+import { EMISSION_BRANCHES } from './branching.js';
 
 const colors = [0x989afa, 0x88df7c];
 const up = new THREE.Vector3(0, 1, 0);
@@ -63,15 +64,18 @@ export function createSequenceRender(beamGroup, atomGroup, trailGroup, addLabel)
 
   const cloud = new THREE.Points(new THREE.BufferGeometry(), new THREE.ShaderMaterial({
     uniforms: { viewportHeight: {value: 1}, pixelRatio: {value: 1}, fluorescence: {value: true},
-      blueOn: {value: true}, greenOn: {value: true}, sampleWeight: {value: 1}, sampleDiameter: {value: 1} },
+      blueOn: {value: true}, greenOn: {value: true}, sampleWeight: {value: 1}, sampleDiameter: {value: 1},
+      emissionYields: {value:new THREE.Vector3(EMISSION_BRANCHES.blue399, EMISSION_BRANCHES.blue556, EMISSION_BRANCHES.green556)} },
     vertexShader: `
       attribute vec2 scattering;
       uniform float viewportHeight, pixelRatio, sampleWeight, sampleDiameter;
       uniform bool fluorescence, blueOn, greenOn;
+      uniform vec3 emissionYields;
       varying vec3 light;
       varying float alpha;
       void main() {
-        vec2 rates = scattering * vec2(blueOn ? 1.0 : 0.0, greenOn ? 1.0 : 0.0);
+        vec2 absorption = scattering * vec2(blueOn ? 1.0 : 0.0, greenOn ? 1.0 : 0.0);
+        vec2 rates = vec2(absorption.x * emissionYields.x, dot(absorption, emissionYields.yz));
         float total = rates.x + rates.y;
         light = fluorescence
           ? (rates.x * vec3(0.66,0.59,1.0) + rates.y * vec3(0.40,1.0,0.39)) / max(total, 0.000001)

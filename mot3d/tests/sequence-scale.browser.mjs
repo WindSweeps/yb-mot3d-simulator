@@ -50,6 +50,7 @@ async function scientificChecks() {
   const {simulateSequence} = await import(new URL('sequence-physics.js',location.href));
   const {sampleInitialStates, CONSTANTS:C} = await import(new URL('physics.js',location.href));
   const {songSequence} = await import(new URL('sequence.js',location.href));
+  const {checkSequenceBranching} = await import(new URL('tests/sequence-branching.js',location.href));
   const shader = document.querySelector('#sequence-compute').textContent;
   const gpu = await createSequenceGpu(shader);
   if (!gpu) throw new Error('真实 WebGPU 适配器不可用');
@@ -98,7 +99,8 @@ async function scientificChecks() {
     const observedUK=diffusion.metrics[diffusion.timesMS.indexOf(pulse.loadMS)].temperatureUK;
     const stats = r => ({...r.summary,temperatureUK:r.metrics.at(-1).temperatureUK,
       radiusMM:r.metrics.at(-1).rmsRadiusMM});
-    return {dark:{...dark.summary,gravityErrorM,darkRates:dark.blueRates.every(x=>x===0)&&dark.greenRates.every(x=>x===0)},
+    return {branching:await checkSequenceBranching(gpu),
+      dark:{...dark.summary,gravityErrorM,darkRates:dark.blueRates.every(x=>x===0)&&dark.greenRates.every(x=>x===0)},
       optics:{counts:optics.summary,reference:reference.summary,positionM:maxDifference(optics.positionsM,reference.positionsM),
         blueFraction:maxDifference(optics.blueRates,reference.blueRates)/reference.blueRates.reduce((m,v)=>Math.max(m,v),0),
         greenFraction:maxDifference(optics.greenRates,reference.greenRates)/reference.greenRates.reduce((m,v)=>Math.max(m,v),0)},
@@ -173,7 +175,8 @@ async function checkPopulation(page, high) {
   const {N0,N1,N2}=high.counts;
   assert.deepEqual(full.counts,[N0,N1,N2,N2]);
   const [loadStage, handoffStage, receiveStage, compressStage] = await page.evaluate(() => window.sequenceScaleTest.result.stages);
-  const rate=1e9*N0/high.n, alpha=.53, beta=1.7e-9;
+  const branchRate = await page.evaluate(() => window.sequenceScaleTest.result.loadBranchLossRate);
+  const rate=1e9*N0/high.n, alpha=.012 + branchRate, beta=1.7e-9;
   const lambda=Math.sqrt(alpha**2+4*beta*rate), exponential=Math.exp(-loadStage.durationMS*lambda/1000);
   const loading=2*rate*(1-exponential)/(lambda+alpha+(lambda-alpha)*exponential);
   assert.ok(Math.abs(full.population[0]-loading)<.001);
@@ -187,7 +190,7 @@ async function checkPopulation(page, high) {
   assert.equal(await handoffBeta.getAttribute('placeholder'),'1e-9');
   await handoffBeta.fill('0');
   const oneBody = await read();
-  const afterHandoff = loading * Math.exp(-.21*handoffStage.durationMS/1000);
+  const afterHandoff = loading * Math.exp(-.012*handoffStage.durationMS/1000);
   assert.ok(Math.abs(oneBody.population[1] - afterHandoff * N1/N0 * Math.exp(-.012*receiveStage.durationMS/1000)) < .001);
   assert.ok(oneBody.population[1] > full.population[1]);
   await handoffBeta.fill('');
@@ -223,7 +226,8 @@ async function checkPopulation(page, high) {
   await page.locator('#sequence-export').click();
   const path = await (await download).path();
   const saved = JSON.parse(await readFile(path, 'utf8'));
-  assert.deepEqual(saved.loading, {flux:1e9, compressBeta:1e-8});
+  assert.equal(saved.format,'yb-mot-sequence-v2');
+  assert.deepEqual(saved.loading, {alphaMode:'background', flux:1e9, compressBeta:1e-8});
   assert.equal(saved.estimatedAtoms.N2, withPairLoss.population[2]);
   await compressBeta.fill('');
   const previousJob = await page.evaluate(() => window.sequenceScaleTest.jobs.at(-1).id);
@@ -231,6 +235,20 @@ async function checkPopulation(page, high) {
   await waitForResult(page, previousJob);
   assert.equal(await compressBeta.inputValue(), '1e-8');
   assert.deepEqual((await read()).population.slice(0,3), withPairLoss.population.slice(0,3));
+  const legacy = {...saved, format:'yb-mot-sequence-v1', loading:{flux:1e9, alpha:.53, compressBeta:1e-8}};
+  const beforeLegacy = await page.evaluate(() => window.sequenceScaleTest.jobs.at(-1).id);
+  await page.locator('#sequence-file').setInputFiles({name:'sequence-v1.json', mimeType:'application/json',
+    buffer:Buffer.from(JSON.stringify(legacy))});
+  await waitForResult(page, beforeLegacy);
+  const mode = form.locator('[name=alphaMode]');
+  assert.equal(await mode.inputValue(),'total');
+  assert.equal(await form.locator('[name=handoffAlpha]').getAttribute('placeholder'),'0.21');
+  const legacyAlpha = Math.max(.53, branchRate);
+  const legacyLambda = Math.sqrt(legacyAlpha**2+4*beta*rate);
+  const expLegacy = Math.exp(-loadStage.durationMS*legacyLambda/1000);
+  assert.ok(Math.abs((await read()).population[0] - 2*rate*(1-expLegacy)/(legacyLambda+legacyAlpha+(legacyLambda-legacyAlpha)*expLegacy)) < .001);
+  await mode.selectOption('background');
+  await form.locator('[name=alpha]').fill('');
   await compressBeta.fill('');
   return full.population;
 }

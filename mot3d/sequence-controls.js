@@ -41,9 +41,10 @@ export function experimentControls(experiment) {
   sequence.push(choice('blueEnabled','399 nm 光闸',gates));
   if (!blueOnly) sequence.push(choice('greenEnabled','556 nm 光闸',gates), choice('powerRamp','压缩功率波形',ramps));
   const losses = [numeric('loading.flux','入射原子通量','原子/s',0,1e15,1e6)];
+  const alphaLabel = experiment.loading?.alphaMode === 'total' ? '总单体损失目标 α' : '背景单体损失 α';
   for (const {id,label} of compileSequence(config).stages) {
     const load = id === 'load';
-    losses.push(numeric('loading.' + (load ? 'alpha' : id + 'Alpha'),label + '单体损失 α','s⁻¹',0,1e4,.01),
+    losses.push(numeric('loading.' + (load ? 'alpha' : id + 'Alpha'),label + alphaLabel,'s⁻¹',0,1e4,.01),
       numeric('loading.' + (load ? 'beta' : id + 'Beta'),label + '双体损失 β','(原子·s)⁻¹',0,1,1e-9));
   }
   return [['时序',sequence],['光束几何',blueOnly ? [lenses[0]] : lenses],['冷原子束',source],['磁场',magnetic],
@@ -65,7 +66,7 @@ export function readControl(experiment, id) {
   if (stored != null) return stored;
   if (key === 'flux') return experiment.params?.incidentFlux ?? DEFAULT_FLUX;
   const program = compileSequence(experiment.config);
-  for (const stage of sequenceLossStages(program)) {
+  for (const stage of sequenceLossStages(program, experiment.loading)) {
     if (key === (stage.id === 'load' ? 'alpha' : stage.id + 'Alpha')) return stage.alpha;
     if (key === (stage.id === 'load' ? 'beta' : stage.id + 'Beta')) return stage.beta;
   }

@@ -13,11 +13,15 @@ const N = 128, pitch = 4e-3 / N;
 // 粒子位于探测器指定像素中心，沿观察轴的位置不影响投影。
 const sample = { positionsM:[.5*pitch, 7.5*pitch, 2.5*pitch], alive:[1], blueRates:[2e5], greenRates:[4e5], weight:12 };
 const center = (63-2)*N + 64;
+const blueGamma = 2 * Math.PI * 29.13e6, greenGamma = 2 * Math.PI * 180e3;
+const blue399 = 1 - (6.18 + 5.25 + .37) / blueGamma, blue556 = 5.25 / blueGamma;
+const green556 = 1 - .00626274 / greenGamma;
+const emitted399 = 2e5 * blue399, emitted556 = 4e5 * green556 + 2e5 * blue556;
 const flu = simulateImagingFrame(sample, settings);
 assert.equal(flu.horizontalAxis, 'X');
 assert.equal(flu.verticalAxis, 'Z');
-close(flu.images.emission[center], 12 * 6e5 * 20e-6);
-close(flu.totalSignal, 12 * 6e5 * 20e-6 * .01);
+close(flu.images.emission[center], 12 * (emitted399 + emitted556) * 20e-6);
+close(flu.totalSignal, 12 * (emitted399 + emitted556) * 20e-6 * .01);
 assert.equal(flu.weightedAtoms, 12);
 const origin = [.5,7.5,2.5].map(x => x * pitch * 1000);
 const centered = simulateImagingFrame({ ...sample, centerMM:origin }, settings);
@@ -29,14 +33,16 @@ const xy = simulateImagingFrame(sample, { ...settings, axis:'z' });
 assert.equal(xy.verticalAxis, 'Y');
 close(xy.images.emission[(63-7)*N+64], flu.images.emission[center]);
 
-for (const [band, fraction] of [['399',1/3],['556',2/3]]) {
+for (const [band, rate] of [['399',emitted399],['556',emitted556]]) {
   const image = simulateImagingFrame(sample, { ...settings, band, sampleSigmaUM:40, psfSigmaUM:35 });
-  close(image.totalSignal, flu.totalSignal * fraction);
+  close(image.totalSignal, 12 * rate * 20e-6 * .01);
   close(sum(image.images.emission), image.totalSignal / .01);
 }
 const weighted = { positionsM:[...sample.positionsM,...sample.positionsM,0,0,0], alive:[1,1,0],
   blueRates:[1e5,3e5,1e9], greenRates:[0,0,1e9], weights:[.25,.75,9e9] };
-close(simulateImagingFrame(weighted,settings).totalSignal, (.25e5+.75*3e5)*20e-6*.01);
+close(simulateImagingFrame(weighted,settings).totalSignal, (.25e5+.75*3e5)*(blue399+blue556)*20e-6*.01);
+close(simulateImagingFrame(weighted,{...settings,band:'556'}).totalSignal,
+  (.25e5+.75*3e5)*blue556*20e-6*.01, 1e-16);
 const edge = simulateImagingFrame({ ...sample, positionsM:[.002+pitch,0,0] }, { ...settings, psfSigmaUM:40 });
 assert.equal(edge.weightedAtoms, 0);
 assert.ok(edge.totalSignal > 0 && edge.totalSignal < flu.totalSignal / 2);

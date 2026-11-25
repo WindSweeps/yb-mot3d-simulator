@@ -1,4 +1,5 @@
 import { compile, radiation } from './physics.js';
+import { EMISSION_BRANCHES } from './branching.js';
 
 export const TRAIL_WINDOW_S = .00015;
 export const TRAIL_FADE_MS = 1000;
@@ -58,7 +59,7 @@ export function createFluorescenceVolume(result) {
     const c = compile(result.params);
     return Float64Array.from(capturedFrom, (first, i) => {
       if (first === frameCount) return 0;
-      return radiation(finalPositions.subarray(3*i, 3*i + 3), finalVelocities.subarray(3*i, 3*i + 3), c).totalRate;
+      return EMISSION_BRANCHES.blue399 * radiation(finalPositions.subarray(3*i, 3*i + 3), finalVelocities.subarray(3*i, 3*i + 3), c).totalRate;
     });
   }
   function at(frame, includeTransient = true) {

@@ -1,4 +1,5 @@
 import { CONSTANTS } from './physics.js';
+import { EMISSION_BRANCHES } from './branching.js';
 
 const SIZE = 128;
 const CROSS_SECTION = 3 * CONSTANTS.wavelength ** 2 / (2 * Math.PI);
@@ -96,6 +97,8 @@ export function simulateImagingFrame(sample, input = {}) {
   const grid = new Float64Array(width * width);
   const [h, v] = projections[s.axis];
   const fluorescence = s.mode === 'fluorescence';
+  const blueYield = (s.band === '556' ? 0 : EMISSION_BRANCHES.blue399) + (s.band === '399' ? 0 : EMISSION_BRANCHES.blue556);
+  const greenYield = s.band === '399' ? 0 : EMISSION_BRANCHES.green556;
   let sampleCount = 0, weightedAtoms = 0;
   for (let i = 0; i < n; i++) {
     if (!alive[i]) continue;
@@ -113,10 +116,10 @@ export function simulateImagingFrame(sample, input = {}) {
     if (u <= -1 || u >= width || row <= -1 || row >= width) continue;
     let amount = w;
     if (fluorescence) {
-      const blue = s.band === '556' ? 0 : blueRates[i], green = s.band === '399' ? 0 : greenRates[i];
+      const blue = blueRates[i], green = greenRates[i];
       if (!Number.isFinite(blue) || !Number.isFinite(green) || blue < 0 || green < 0)
         throw new RangeError('荧光散射率无效。');
-      amount *= (blue + green) * exposureS;
+      amount *= (blue * blueYield + green * greenYield) * exposureS;
     }
     deposit(grid, width, u, row, amount);
   }

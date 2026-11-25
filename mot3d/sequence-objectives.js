@@ -59,6 +59,11 @@ function objectiveList(experiment, program) {
     return loss.status === 'reached' && c.timeMS >= program.stages[0].endMS + loss.timeMS ? loss.timeMS : null;
   }, {availableFromMS:program.stages[0].endMS});
   add('alpha', '当前阶段有效单体损失系数 α', 's⁻¹', c => c.loss.alpha);
+  add('backgroundLossRate', '分支以外的单体损失系数', 's⁻¹', c => c.loss.background);
+  add('branchLossRate', '光学分支损失系数', 's⁻¹', c => c.loss.branchLossRate);
+  add('darkBranches.blueP0', '399 nm 累计进入 ³P₀ 的轨迹数', '条', c => c.cloud.darkBranches.blueP0);
+  add('darkBranches.blueP2', '399 nm 累计进入 ³P₂ 的轨迹数', '条', c => c.cloud.darkBranches.blueP2);
+  if (!blueOnly) add('darkBranches.greenP0', '556 nm 累计进入 ³P₀ 的轨迹数', '条', c => c.cloud.darkBranches.greenP0);
   add('beta', '当前阶段有效双体损失系数 β', '(原子·s)⁻¹', c => c.loss.beta);
   add('oneBodyLoss', '单体损失速率 αN', '原子/s', c => c.loss.alpha * c.atoms);
   add('twoBodyLoss', '双体损失速率 βN²', '原子/s', c => c.loss.beta * c.atoms ** 2);

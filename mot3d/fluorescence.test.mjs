@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { CONSTANTS, simulate } from './physics.js';
+import { branchDraws } from './branching.js';
 import { createFluorescence, DEFAULT_FLUX, FLUORESCENCE_VIEW } from './fluorescence.js';
 
 const { h, c, gamma, wavelength } = CONSTANTS;
@@ -18,14 +19,20 @@ const source = createFluorescence(stationary);
 const saturationIntensity = Math.PI * h * c * gamma / (3 * wavelength ** 3);
 const saturation = 6 * 2 * .015 / (Math.PI * .006 ** 2 * saturationIntensity);
 const rate = .5 * gamma * saturation / (1 + saturation);
+const darkProbability = (6.18 + .37) / gamma;
+const blueYield = 1 - (6.18 + 5.25 + .37) / gamma;
+const brightTimes = Array.from({length:fixedAtoms.n}, (_, index) =>
+  branchDraws(stationary.params.seed, index).threshold / (rate * darkProbability));
+const retainedFraction = brightTimes.filter(time => time > fixedAtoms.durationMS / 1000).length / fixedAtoms.n;
 for (const f of [0, 1, 13, 32, 8, 32]) {
   const { emittedRate, emittedPowerW, image, roiRate, loadingRate } = source.at(f, DEFAULT_FLUX, true);
-  relativeClose(emittedRate, DEFAULT_FLUX * rate * stationary.times[f], 1e-6, '恒定单原子散射率和连续源卷积');
+  const meanBrightTime = brightTimes.reduce((sum, time) => sum + Math.min(time, stationary.times[f]), 0) / fixedAtoms.n;
+  relativeClose(emittedRate, DEFAULT_FLUX * rate * blueYield * meanBrightTime, 1e-6, '暗态截止后的 399 nm 发射率和连续源卷积');
   relativeClose(emittedPowerW, emittedRate * h * c / wavelength, 2e-15, '发射功率');
   relativeClose(roiRate, emittedRate, 2e-15, '区域积分光子率');
   const centre = Math.floor(zMaxMM / pixelMM) * width + Math.floor(-xMinMM / pixelMM);
   assert.equal(image[centre], roiRate);
-  assert.equal(loadingRate, DEFAULT_FLUX);
+  assert.equal(loadingRate, DEFAULT_FLUX * retainedFraction);
 }
 const finalRate = source.at(32).emittedRate;
 const doubleFlux = source.at(32, 2 * DEFAULT_FLUX, true);
