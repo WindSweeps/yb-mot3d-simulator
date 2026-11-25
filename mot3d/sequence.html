@@ -54,6 +54,24 @@
         <p id="sequence-scene-error" role="alert" hidden></p>
       </div>
       <section id="sequence-imaging" aria-label="模拟相机成像"></section>
+      <section id="sequence-curves" aria-label="原子数与 PSD">
+        <div class="seq-curve-tools">
+          <label>时间范围 <select id="seq-curve-stage">
+            <option value="all">完整时序</option><option value="load">双色装载</option><option value="handoff">交接</option><option value="green">纯绿接收</option><option value="compress">绿光压缩</option>
+          </select></label>
+          <output id="seq-curve-time" aria-label="游标时刻">0 ms</output>
+        </div>
+        <div class="seq-curve-readouts">
+          <span>阱内原子数 <output id="seq-curve-atoms">—</output></span>
+          <span>峰值 PSD <output id="seq-curve-psd">—</output></span>
+        </div>
+        <svg id="seq-curve-plot" role="slider" tabindex="0" aria-label="曲线上的时序游标" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0">
+          <g class="seq-curve-axes"></g>
+          <path class="seq-atoms-trace"></path><path class="seq-psd-trace"></path>
+          <line id="seq-curve-cursor"></line><rect id="seq-curve-area" fill="transparent"></rect>
+        </svg>
+        <p class="sequence-note">PSD 为六维高斯等效峰值相空间密度。样本不足或协方差退化时，PSD 曲线留空。装载轨迹积分结束后，沿用该时刻的云团分布，并按装载方程更新原子数。</p>
+      </section>
       <section class="sequence-readings" id="sequence-readings" aria-label="样本与转移效率">
         <h2>原子样本</h2>
         <div class="sequence-population-head">

@@ -19,7 +19,7 @@ await page.addInitScript(()=>{
   window.dockTestErrors=[];
   window.addEventListener('error',event=>window.dockTestErrors.push(event.message));
 });
-const labels = { timeline:'通道时序', scene:'三维 MOT', imaging:'相机成像', readings:'原子样本' };
+const labels = { timeline:'通道时序', scene:'三维 MOT', imaging:'相机成像', readings:'原子样本', curves:'原子数与 PSD' };
 const entries = new Map(Object.entries(labels).map(([id,text])=>[text,id]));
 const keyPrefix = 'yb-mot3d-sequence-layout-v1-';
 const find = selector => page.locator(selector);
@@ -169,9 +169,9 @@ async function verifyInstances() {
     }
   }
 }
-async function assertFour() {
+async function assertPanels() {
   const groups=await layout();
-  assert.deepEqual(groups.flatMap(g=>g.tabs).sort(),Object.keys(labels).sort(),'all four distinct panels are reachable');
+  assert.deepEqual(groups.flatMap(g=>g.tabs).sort(),Object.keys(labels).sort(),'all sequence panels are reachable');
   return groups;
 }
 try {
@@ -181,11 +181,11 @@ try {
   assert.deepEqual(errors,[]);
   await page.waitForFunction(()=>window.dockTestErrors.length || document.querySelector('[data-action=play]')?.disabled===false,null,{timeout:90000});
   assert.deepEqual(errors,[]);
-  const standard=await assertFour();
+  const standard=await assertPanels();
   assert.equal(standard.length,3);
   assert.ok(groupOf(standard,'scene').x>groupOf(standard,'timeline').x);
   assert.ok(groupOf(standard,'imaging').y>groupOf(standard,'scene').y);
-  assert.deepEqual(groupOf(standard,'imaging').tabs,['imaging','readings']);
+  assert.deepEqual(groupOf(standard,'imaging').tabs,['imaging','readings','curves']);
   assert.equal(groupOf(standard,'imaging').active,'imaging');
   await checkTimelineDrag();
   await resizeSeparator('horizontal',-210,-90);
@@ -197,11 +197,11 @@ try {
   const firstCount=workers;
   assert.equal(firstCount,1);
   await drop('imaging','scene','center');
-  const stacked=await assertFour();
+  const stacked=await assertPanels();
   assert.equal(stacked.length,3,JSON.stringify(stacked));
   assert.ok(groupOf(stacked,'scene').tabs.includes('imaging'),'center drop stacks tabs '+JSON.stringify(stacked));
   await drop('imaging','timeline','left');
-  const split=await assertFour();
+  const split=await assertPanels();
   assert.equal(split.length,4,'edge drop splits the target '+JSON.stringify(split));
   assert.ok(groupOf(split,'imaging').x<groupOf(split,'timeline').x);
   await resizeSeparator('vertical',70,-150);
@@ -214,7 +214,7 @@ try {
   const persisted=await storage('wide'); assert.ok(persisted);
   await page.setViewportSize({width:390,height:850});
   await page.waitForFunction(()=>document.querySelectorAll('#sequence-dock .dv-groupview').length===1);
-  const compact=await assertFour();
+  const compact=await assertPanels();
   assert.equal(compact.length,1);
   await verifyInstances();
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),390);
@@ -230,17 +230,17 @@ try {
   await page.reload();
   await tab('imaging').waitFor();
   await page.waitForFunction(()=>document.querySelector('#seq-imaging-mode')?.offsetWidth>0);
-  const restored=await assertFour();
+  const restored=await assertPanels();
   assert.deepEqual(fingerprint(restored),fingerprint(saved));
   for(const g of restored) assert.ok(Math.abs(g.w-groupOf(saved,g.tabs[0]).w)<3,'persisted splitter width');
   const reset=find('#sequence-layout-reset');
   await reset.click(); await settled();
-  const resetState=await assertFour();
+  const resetState=await assertPanels();
   assert.deepEqual(fingerprint(resetState),fingerprint(standard),'restore initial default grouping');
   await place('readings','float');
   assert.equal(await host.locator('.dv-groupview-floating .dv-tab').filter({hasText:labels.readings}).count(),1);
   await place('readings','center','imaging');
-  assert.deepEqual(groupOf(await layout(),'imaging').tabs.sort(),['imaging','readings']);
+  assert.deepEqual(groupOf(await layout(),'imaging').tabs.sort(),['curves','imaging','readings']);
   await reset.click();
   const deep=await context.newPage();
   await deep.setViewportSize({width:390,height:850});

@@ -5,6 +5,7 @@ const panels = [
   ['scene', '三维 MOT', 'sequence-scene'],
   ['imaging', '相机成像', 'sequence-imaging'],
   ['readings', '原子样本', 'sequence-readings'],
+  ['curves', '原子数与 PSD', 'sequence-curves'],
 ];
 const compactScreen = matchMedia('(max-width: 800px)');
 const storagePrefix = 'yb-mot3d-sequence-layout-v1-';
@@ -14,11 +15,10 @@ function shelfName() {
   return compactScreen.matches ? 'compact' : 'wide';
 }
 
-// 只还原本页的四个面板和页内窗口。
-function validLayout(layout) {
+function validLayout(layout, expected) {
   if (!layout?.grid || layout.grid.root?.type !== 'branch' || !layout.panels ||
-      Object.keys(layout.panels).length !== panels.length || layout.popoutGroups?.length) return false;
-  if (!panels.every(([id]) => layout.panels[id]?.id === id && layout.panels[id].contentComponent === id)) return false;
+      Object.keys(layout.panels).length !== expected.length || layout.popoutGroups?.length) return false;
+  if (!expected.every(([id]) => layout.panels[id]?.id === id && layout.panels[id].contentComponent === id)) return false;
   const groups = [];
   function visit(node) {
     if (node.type === 'leaf') groups.push(node.data);
@@ -27,7 +27,7 @@ function validLayout(layout) {
   visit(layout.grid.root);
   for (const floating of layout.floatingGroups ?? []) groups.push(floating.data);
   const ids = groups.flatMap(group => group.views);
-  return ids.length === panels.length && panels.every(([id]) => ids.includes(id));
+  return ids.length === expected.length && expected.every(([id]) => ids.includes(id));
 }
 
 export function mountSequenceDock() {
@@ -72,21 +72,23 @@ export function mountSequenceDock() {
   // 发生断点切换时容器可能已经变窄，保留最近一次完整布局的尺寸。
   let lastLayout = null, lastWidth = host.clientWidth;
 
+  function add(id, referencePanel, direction, inactive = false) {
+    const compact = profile === 'compact';
+    return dock.addPanel({
+      id, title: titles.get(id), component: id, renderer: 'always', inactive,
+      minimumWidth: compact ? 120 : 228, minimumHeight: 110,
+      ...(referencePanel && {position: {referencePanel, direction}}),
+    });
+  }
   function defaults() {
     dock.clear();
     dock.layout(host.clientWidth, host.clientHeight);
     const compact = profile === 'compact';
-    function add(id, referencePanel, direction, inactive = false) {
-      return dock.addPanel({
-        id, title: titles.get(id), component: id, renderer: 'always', inactive,
-        minimumWidth: compact ? 120 : 228, minimumHeight: 110,
-        ...(referencePanel && {position: {referencePanel, direction}}),
-      });
-    }
     const timeline = add('timeline');
     const scene = add('scene', timeline, compact ? 'within' : 'right');
     const imaging = add('imaging', scene, compact ? 'within' : 'below');
-    add('readings', imaging, 'within', true);
+    const readings = add('readings', imaging, 'within', true);
+    add('curves', readings, 'within', true);
     if (!compact) {
       timeline.api.setSize({width: Math.round(host.clientWidth * .46)});
       scene.api.setSize({height: Math.round(host.clientHeight * .52)});
@@ -111,8 +113,13 @@ export function mountSequenceDock() {
     dock.layout(host.clientWidth, host.clientHeight);
     try {
       const saved = JSON.parse(localStorage.getItem(storagePrefix + profile));
-      if (validLayout(saved)) {
+      const oldLayout = validLayout(saved, panels.filter(([id]) => id !== 'curves'));
+      if (oldLayout || validLayout(saved, panels)) {
         dock.fromJSON(saved);
+        if (oldLayout) {
+          add('curves', dock.getPanel('readings'), 'within', true);
+          writeLayout(dock.toJSON());
+        }
         restored = true;
       }
     } catch { /* 过期或被浏览器截断的布局从默认排列重新开始。 */ }

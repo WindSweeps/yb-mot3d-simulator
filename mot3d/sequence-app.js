@@ -7,6 +7,7 @@ import { sequenceLossStages, sequencePopulation } from './sequence-population.js
 import { fluorescenceExposure, sequenceFrameAt } from './sequence-exposure.js';
 import { mountImagingPanel, validateImagingSettings } from './sequence-imaging-view.js';
 import { mountSequenceDock } from './sequence-dock.js';
+import { mountSequenceCurves } from './sequence-curves.js';
 
 // 时序与求解器持续更新同一组控件，停靠过程可以移动它们的父节点。
 const elements = new Map(Array.from(document.querySelectorAll('[id]'), el => ['#' + el.id, el]));
@@ -88,10 +89,33 @@ function showAtoms(output, count) {
   }
 }
 
+function curvePoint(timeMS, frame = sequenceFrameAt(result.timesMS, timeMS)) {
+  const metric = result.metrics[frame];
+  const atoms = population.at(timeMS, metric.count);
+  const psd = metric.psdPerAtom === null ? null : atoms * metric.psdPerAtom;
+  return {timeMS, atoms, psd};
+}
+
+function refreshCurves() {
+  const points = [];
+  if (population) {
+    for (const [frame, time] of result.timesMS.entries()) {
+      points.push(curvePoint(time, frame));
+      // 装载等待期复用捕获云快照，原子数继续按非线性装载方程增长。
+      const end = program.stages[0].endMS;
+      if (time === result.loadWindowMS && end > time) {
+        for (let i = 1; i < 160; i++) points.push(curvePoint(time + (end - time) * (i / 160) ** 2, frame));
+      }
+    }
+  }
+  curves.setSeries(points, program.stages);
+}
+
 function summarize() {
   const counts = result?.summary;
   population = result && loadingForm.checkValidity()
     ? sequencePopulation(program, result, loading) : null;
+  refreshCurves();
   const atoms = population?.estimatedAtoms;
   for (const key of ['N0','N1','N2']) {
     const suffix = key.toLowerCase();
@@ -131,7 +155,9 @@ function showFrame(t) {
   $('#seq-count').textContent = metric?.count ?? blank;
   $('#seq-temperature').textContent = numberOrBlank(metric?.temperatureUK, 1);
   $('#seq-radius').textContent = numberOrBlank(metric?.rmsRadiusMM, 3);
-  const count = population && population.at(timeMS, metric.count);
+  const point = population && curvePoint(timeMS, f);
+  const count = point?.atoms;
+  curves.setCursor(timeMS, count ?? null, point?.psd ?? null);
   showAtoms($('#seq-population'), count);
   $('#seq-scene-population').textContent = Number.isFinite(count) ? '估计阱内 ' + scientificCount(count) + ' 个原子' : '';
   const windowMS = Math.min(20, program.stages[0].durationMS);
@@ -156,6 +182,7 @@ function showImaging(sceneSample, f) {
   imaging.setFrame(context);
 }
 
+const curves = mountSequenceCurves($('#sequence-curves'), t => { editor.pause(); editor.setTime(t); });
 const editor = mountSequenceEditor($('#sequence-editor'), {
   initialPreset,
   onPreset(id) {
@@ -348,7 +375,7 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) edito
 window.addEventListener('pagehide', e => {
   editor.pause();
   if (e.persisted) return;
-  clearTimeout(timer); worker?.terminate(); imaging.destroy(); editor.destroy(); scene?.destroy();
+  clearTimeout(timer); worker?.terminate(); curves.destroy(); imaging.destroy(); editor.destroy(); scene?.destroy();
 });
 mountSequenceDock();
 fillInputs();

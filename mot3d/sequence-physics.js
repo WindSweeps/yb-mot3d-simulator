@@ -142,7 +142,7 @@ export function prepareSequenceRun(input, config, options = {}) {
 }
 
 function frameMoments() {
-  return {count:0, live:0, width:0, thermal:0, center:[0,0,0], meanV:[0,0,0]};
+  return {count:0, live:0, mean:new Float64Array(6), delta:new Float64Array(6), scatter:new Float64Array(36)};
 }
 
 function writeAtom(result, k, pos, offsetP, vel, offsetV, live, trapped, blueRate, greenRate, m) {
@@ -156,24 +156,54 @@ function writeAtom(result, k, pos, offsetP, vel, offsetV, live, trapped, blueRat
   result.greenRates[k] = greenRate;
   if (!trapped) return;
   result.trapped[k] = 1;
-  m.count++;
-  for (let a = 0; a < 3; a++) {
-    const mm = 1000 * pos[offsetP+a], speed = vel[offsetV+a];
-    const dx = mm - m.center[a], dv = speed - m.meanV[a];
-    m.center[a] += dx/m.count;
-    m.meanV[a] += dv/m.count;
-    m.width += dx * (mm - m.center[a]);
-    m.thermal += dv * (speed - m.meanV[a]);
+  const count = ++m.count;
+  for (let axis = 0; axis < 3; axis++) {
+    m.delta[axis] = pos[offsetP + axis] - m.mean[axis];
+    m.delta[axis + 3] = vel[offsetV + axis] - m.mean[axis + 3];
+  }
+  // Welford 更新中心二阶矩，六个分量依次为位置（m）和速度（m/s）。
+  const correction = (count - 1) / count;
+  for (let row = 0; row < 6; row++) {
+    m.mean[row] += m.delta[row] / count;
+    const correctedDelta = m.delta[row] * correction;
+    for (let col = 0; col <= row; col++) m.scatter[6*row + col] += correctedDelta * m.delta[col];
   }
 }
 
+function phaseSpaceDensityPerAtom(count, scatter) {
+  if (count < 7) return null;
+  // 先消去各分量的量纲，再对相关矩阵作 Cholesky 分解。
+  const scales = new Float64Array(6), lower = new Float64Array(36);
+  let volume = 1;
+  for (let row = 0; row < 6; row++) {
+    scales[row] = Math.sqrt(scatter[7*row]);
+    if (!(scales[row] > 0)) return null;
+    for (let col = 0; col <= row; col++) {
+      let pivot = row === col ? 1 : scatter[6*row + col] / scales[row] / scales[col];
+      for (let j = 0; j < col; j++) pivot -= lower[6*row + j] * lower[6*col + j];
+      if (row === col) {
+        if (!(pivot > 36 * Number.EPSILON)) return null;
+        lower[7*row] = Math.sqrt(pivot);
+        volume *= lower[7*row] * (scales[row] / Math.sqrt(count - 1));
+      } else {
+        lower[6*row + col] = pivot / lower[7*col];
+      }
+    }
+  }
+  const density = (C.hbar / C.mass)**3 / volume;
+  return Number.isFinite(density) ? density : null;
+}
+
 function finishFrame(run, frame, m) {
-  const {count, center, width, thermal} = m, checkpoint = run.grid[frame].checkpoint;
+  const {count, mean, scatter} = m, checkpoint = run.grid[frame].checkpoint;
   if (checkpoint) run.result.summary[checkpoint] = m.live;
+  const width = scatter[0] + scatter[7] + scatter[14];
+  const thermal = scatter[21] + scatter[28] + scatter[35];
   run.result.metrics.push({
-    count, centroidMM:count ? center : null,
-    rmsRadiusMM:count ? Math.sqrt(Math.max(0,width)/count) : null,
+    count, centroidMM:count ? [1000*mean[0], 1000*mean[1], 1000*mean[2]] : null,
+    rmsRadiusMM:count ? 1000*Math.sqrt(width/count) : null,
     temperatureUK:count > 1 ? C.mass*Math.max(0,thermal)*1e6/(3*C.kB*(count-1)) : null,
+    psdPerAtom:phaseSpaceDensityPerAtom(count, scatter),
   });
 }
 

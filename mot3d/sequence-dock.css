@@ -85,6 +85,23 @@
 .dock-panel .seq-title p, .dock-panel .sequence-scene-head p { margin: 0; }
 .dock-panel .seq-imager { padding-block: 10px; }
 .dock-panel .si-step-controls { margin-block: 8px; }
+#sequence-curves { padding: 12px 14px; color: var(--text); font-size: var(--meta); }
+.seq-curve-tools,.seq-curve-readouts { display:flex; justify-content:space-between; gap:6px 12px; flex-wrap:wrap; align-items:center; }
+.seq-curve-tools label { color:var(--muted); }
+.seq-curve-tools select { font:inherit; }
+.seq-curve-readouts { margin:8px 0; justify-content:flex-start; color:var(--muted); }
+.seq-curve-readouts output,#seq-curve-time { font-family:var(--mono); font-variant-numeric:tabular-nums; }
+#seq-curve-atoms { color:var(--lime); }
+#seq-curve-psd { color:var(--cyan); }
+#seq-curve-plot { display:block; width:100%; height:254px; outline-offset:2px; user-select:none; }
+#seq-curve-plot:focus-visible { outline:2px solid var(--cyan); }
+.seq-curve-axes line { stroke:var(--line); }
+.seq-curve-axes text { fill:var(--muted); font:var(--meta) var(--sans); }
+.seq-atoms-trace,.seq-psd-trace { fill:none; stroke-width:2; stroke-linejoin:round; }
+.seq-atoms-trace { stroke:var(--lime); }
+.seq-psd-trace { stroke:var(--cyan); }
+#seq-curve-cursor { stroke:var(--text); stroke-width:1; stroke-dasharray:4 3; }
+#seq-curve-area { cursor:crosshair; touch-action:pan-y; }
 @container (max-width: 490px) {
   .dock-panel .seq-chart { --seq-chart-gap: 3px; }
   .dock-panel .seq-ruler-row, .dock-panel .seq-lane { grid-template-columns: 70px minmax(0,1fr) 72px; }
