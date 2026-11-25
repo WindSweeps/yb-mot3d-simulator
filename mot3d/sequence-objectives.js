@@ -69,7 +69,7 @@ function objectiveList(experiment, program) {
   add('twoBodyLoss', '双体损失速率 βN²', '原子/s', c => c.loss.beta * c.atoms ** 2);
 
   group = '阶段检查点';
-  const labels = ['装载结束 N₀', blueOnly ? '保持中点 N₁' : '纯绿接收结束 N₁', blueOnly ? '保持结束 N₂' : '压缩结束 N₂'];
+  const labels = ['装载结束 N₀', blueOnly ? '中点驻留 N₁' : '纯绿接收结束 N₁', blueOnly ? '末端驻留 N₂' : '压缩结束 N₂'];
   for (const [i, label] of labels.entries()) {
     const key = 'N' + i, when = {availableFromMS:program.checkpointTimesMS[i]};
     add(key + '.atoms', label + ' · 原子数', '原子', c => c.population.estimatedAtoms[key], when);

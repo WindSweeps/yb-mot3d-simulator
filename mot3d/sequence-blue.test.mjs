@@ -60,6 +60,27 @@ assert.equal(drift.timesMS.at(-1), 3000.1);
 assert.ok(Math.abs(drift.positionsM.at(-6) - .0005*3.0001) < 2e-10);
 assert.ok(Math.abs(drift.positionsM.at(-3) - .0014*3.0001) < 3e-10);
 
+// 重力抛物线在 30 ms 越出阱内观测半径，60 ms 返回。改变检查时刻不会终止轨迹。
+const launch = {initialStates:[0,0,0,0,0,.3]};
+const flight = {n:1, gravity:true, recoil:false};
+const shortWindow = {...darkHold, holdMS:60};
+const short = simulateSequence(flight, shortWindow, launch);
+const long = simulateSequence(flight, {...darkHold,holdMS:120}, launch);
+const end = shortWindow.loadMS + shortWindow.holdMS;
+const longFrame = long.timesMS.indexOf(end);
+assert.ok(longFrame > 0);
+assert.deepEqual(short.summary, {N0:1,N1:0,N2:0});
+assert.deepEqual(Object.fromEntries(Object.entries(short.checkpointRetained).map(([k, v]) => [k,v[0]])), short.summary);
+assert.equal(short.alive.at(-1), 1);
+assert.equal(short.trapped.at(-1), 1);
+assert.equal(long.trapped[longFrame], 1);
+assert.equal(long.checkpointRetained.N1[0], 1);
+assert.equal(short.positionsM.at(-1), long.positionsM[3*longFrame+2]);
+const noCollisions = {flux:1e6,alpha:0,beta:0,holdAlpha:0,holdBeta:0};
+const shortCloud = sequencePopulation(compileSequence(shortWindow), short, noCollisions);
+assert.equal(shortCloud.at(end, short.metrics.at(-1).count), shortCloud.loaded);
+assert.equal(shortCloud.estimatedAtoms.N2, 0);
+
 // 时间跨度超过单帧 32 位步号的容量。装载时从未入阱的原子能直接计算整段空云的回放。
 const veryLong = {...darkHold, holdMS:200_000_000};
 const outside = {initialStates:[.004,0,0,0,0,0]};

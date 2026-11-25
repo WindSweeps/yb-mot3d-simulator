@@ -105,6 +105,14 @@
 .seq-atoms-trace,.seq-psd-trace { fill:none; stroke-width:2; stroke-linejoin:round; }
 .seq-atoms-trace { stroke:var(--lime); }
 .seq-psd-trace { stroke:var(--cyan); }
+.seq-loss-guides { pointer-events:none; }
+.seq-loss-guides line { stroke:var(--amber); stroke-dasharray:4 3; }
+.seq-loss-guides circle,.seq-loss-guides rect { fill:var(--panel); stroke:var(--amber); stroke-width:2; }
+#seq-show-decay { margin-top:2px; min-height:28px; padding:0 5px 0 0; }
+#seq-loss-values { display:flex; flex-wrap:wrap; gap:3px 14px; margin:0 0 10px; color:var(--muted); font-variant-numeric:tabular-nums; }
+#seq-loss-values[hidden] { display:none; }
+#seq-loss-values [data-marker]::before { display:inline-block; content:''; width:6px; height:6px; border:1.5px solid var(--amber); margin-right:5px; }
+#seq-loss-values [data-marker="crossing"]::before { border-radius:50%; }
 #seq-curve-cursor { stroke:var(--text); stroke-width:1; stroke-dasharray:4 3; }
 #seq-curve-area { cursor:crosshair; touch-action:pan-y; }
 #sequence-optimizer { padding:12px 14px; font-size:var(--meta); }

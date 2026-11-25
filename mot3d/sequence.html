@@ -104,12 +104,16 @@
         <div class="seq-curve-constants">
           <div><label for="seq-curve-tau-loading">装载时间常数 τ</label> <output id="seq-curve-tau-loading" aria-describedby="seq-tau-loading-definition">暂无模拟数据</output>
             <p id="seq-tau-loading-definition">从开始装载到原子数达到模型稳态值的 63.2%。</p></div>
-          <div><label for="seq-curve-tau-loss">损失时间常数 τ</label> <output id="seq-curve-tau-loss" aria-describedby="seq-tau-loss-definition">暂无模拟数据</output>
-            <p id="seq-tau-loss-definition">从关闭入射原子束到阱内原子数首次降至关源时的 1/e（36.8%）。</p></div>
+          <div><label for="seq-curve-tau-loss">关源后 1/e 衰减时间</label> <output id="seq-curve-tau-loss" aria-describedby="seq-tau-loss-definition seq-loss-sampling">暂无模拟数据</output>
+            <p id="seq-tau-loss-definition">从关闭入射原子束到阱内原子数首次降至关源时的 36.8%。</p>
+            <p id="seq-loss-sampling" hidden></p>
+            <button type="button" id="seq-show-decay" class="text-button" aria-pressed="false" disabled>查看关源衰减</button></div>
         </div>
+        <div id="seq-loss-values" hidden></div>
         <svg id="seq-curve-plot" role="slider" tabindex="0" aria-label="曲线上的时序游标" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0">
           <g class="seq-curve-axes"></g>
           <path class="seq-atoms-trace"></path><path class="seq-psd-trace"></path>
+          <g class="seq-loss-guides" aria-hidden="true"></g>
           <line id="seq-curve-cursor"></line><rect id="seq-curve-area" fill="transparent"></rect>
         </svg>
         <p class="sequence-note">PSD 为六维高斯等效峰值相空间密度。样本不足或协方差退化时，PSD 曲线留空。装载轨迹积分结束后，沿用该时刻的云团分布，并按装载方程更新原子数。</p>
@@ -205,10 +209,10 @@ struct Atom {
   pos: vec3f, live: u32,
   vel: vec3f, held: u32,
   rng: u32, branchThreshold: f32, branchChoice: f32, darkChannel: u32,
-  opticalDepth: f32, depthCorrection: f32, padding: vec2u,
+  opticalDepth: f32, depthCorrection: f32, missedCheckpoint: u32, padding: u32,
 }
 struct FramePlan {
-  flags: vec4u,           // 起点光场阶段、帧末留存筛选
+  flags: vec4u,           // 起点光场阶段、帧末检查点、仅统计驻留的开关
   step: vec4f,            // dt 秒、起点在阶段的相对位置、每步的相对长度
   endPeaks: vec4f,
   endFields: vec4f,       // 两色帧末失谐和帧末梯度，含阶段边沿突变
@@ -393,6 +397,15 @@ fn advanceBranch(p: ptr<function,Atom>, r: Radiation, dt: f32) -> f32 {
   return clamp(((*p).branchThreshold-previous)/total,0.0,dt);
 }
 
+fn recordCheckpoint(p: ptr<function,Atom>, observeOnly: bool) -> f32 {
+  // 保持中点和终点的条件驻留统计继承前一检查点的资格。
+  let selected = (*p).live & (*p).held & (1u - (*p).missedCheckpoint);
+  (*p).missedCheckpoint = 1u - selected;
+  (*p).held = 1u;
+  if (!observeOnly) { (*p).live = selected; }
+  return f32(selected);
+}
+
 @compute @workgroup_size(32)
 fn advanceBatch(@builtin(global_invocation_id) invocation: vec3u) {
   let id = invocation.x;
@@ -418,7 +431,8 @@ fn advanceBatch(@builtin(global_invocation_id) invocation: vec3u) {
     if (step+1u>=batch.heldFrom && !inside(p.pos,p.vel)) { p.held=0u; }
   }
   if (batch.finishFrame!=0u) {
-    if (plan.flags.y!=0u) { p.live &= p.held; p.held=1u; }
+    var selected = 0.0;
+    if (plan.flags.y!=0u) { selected = recordCheckpoint(&p,plan.flags.z!=0u); }
     var rates = vec2f(0.0);
     if (p.live!=0u) {
       let end = Channels(plan.endPeaks,plan.endFields.xy,plan.endFields.z);
@@ -426,7 +440,7 @@ fn advanceBatch(@builtin(global_invocation_id) invocation: vec3u) {
       rates = vec2f(r.blueTotal,r.greenTotal);
     }
     history[batch.pageFrame*n+id] = OutputSample(vec4f(p.pos,f32(p.live)),
-      vec4f(p.vel,f32(p.live!=0u && inside(p.pos,p.vel))),vec4f(rates,f32(p.darkChannel),0.0));
+      vec4f(p.vel,f32(p.live!=0u && inside(p.pos,p.vel))),vec4f(rates,f32(p.darkChannel),selected));
   }
   particles[id] = p;
 }

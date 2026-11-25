@@ -101,15 +101,26 @@ function loadingTimeConstant(rate, alpha, beta) {
   return Number.isFinite(timeMS) ? {status:'reached', timeMS} : {status:'out-of-range', timeMS:null};
 }
 
-function lossTimeConstant(intervals, endMS, finalWeight, finalCount, loaded) {
+function lossTimeConstant(intervals, timesMS, endMS, finalWeight, finalCount, loaded) {
   if (loaded === 0) return {status:'empty', timeMS:null};
   const target = loaded / Math.E, shutoff = intervals[0].start;
   // 解析权重逐帧递推。判定帧沿恰好达到阈值时，计入已经累积的浮点舍入误差。
   const reachesAtFrame = (atoms, index) => atoms <= target * (1 + 4 * (index+1) * Number.EPSILON);
+  function frameCrossing(time, frame, previousCount, weight, i) {
+    const crossing = {status:'reached', timeMS:time - shutoff};
+    // 连续损失已达阈值时有解析时刻。只有阈值落在计数跳变内才受输出帧间隔限制。
+    if (frame > 0 && !reachesAtFrame(previousCount * weight, i)) {
+      crossing.bracketMS = [Math.max(0, timesMS[frame-1] - shutoff), time - shutoff];
+    }
+    return crossing;
+  }
   for (let i = 0; i < intervals.length; i++) {
     const {start, count, weight, alpha, beta} = intervals[i], next = intervals[i+1];
     const elapsed = start - shutoff;
-    if (reachesAtFrame(weight * count, i)) return {status:'reached', timeMS:elapsed};
+    if (reachesAtFrame(weight * count, i)) {
+      const previousCount = intervals[i-1]?.count ?? count;
+      return frameCrossing(start, intervals[i].frame, previousCount, weight, i);
+    }
     // 帧内计数固定，N 单调衰减。帧沿使用新计数，因此跳变发生在观察帧时刻。
     if ((next?.weight ?? finalWeight) * count < target) {
       let lo = 0, hi = (next?.start ?? endMS) - start;
@@ -122,7 +133,9 @@ function lossTimeConstant(intervals, endMS, finalWeight, finalCount, loaded) {
       return {status:'reached', timeMS:elapsed + hi};
     }
   }
-  return {status:reachesAtFrame(finalWeight * finalCount, intervals.length) ? 'reached' : 'lower-bound', timeMS:endMS - shutoff};
+  if (reachesAtFrame(finalWeight * finalCount, intervals.length))
+    return frameCrossing(endMS, timesMS.length-1, intervals.at(-1).count, finalWeight, intervals.length);
+  return {status:'lower-bound', timeMS:endMS - shutoff};
 }
 
 export function sequencePopulation(program, result, settings) {
@@ -160,7 +173,7 @@ export function sequencePopulation(program, result, settings) {
     const count = timesMS[frame] < load.endMS ? captured : metrics[frame].count;
     // 关源后暗态跃迁已经改变存留轨迹数，每条亮态轨迹的权重只积分其余损失。
     const {background:alpha, beta} = effectiveLoss(stages[stage], metrics[frame].branchLossRate);
-    intervals.push({start, count, weight, alpha, beta});
+    intervals.push({start, frame, count, weight, alpha, beta});
     weight = holdWeight(weight, count, boundaries[i + 1] - start, alpha, beta);
   }
   const finalWeight = weight;
@@ -179,7 +192,7 @@ export function sequencePopulation(program, result, settings) {
   function timeConstants() {
     return {
       loading:loadingTimeConstant(loadingRate, loadLoss.alpha, load.beta),
-      loss:lossTimeConstant(intervals, program.durationMS, finalWeight, metrics.at(-1).count, loaded),
+      loss:lossTimeConstant(intervals, timesMS, program.durationMS, finalWeight, metrics.at(-1).count, loaded),
     };
   }
   function lossAt(stageIndex, frame) {

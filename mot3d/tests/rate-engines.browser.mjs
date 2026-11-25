@@ -109,7 +109,14 @@ try {
         branches[model] = {blue:await checkBlueBranches(mot.run,model),
           sequence:await checkSequenceBranching(sequence,model)};
       }
-      return {adapterInfo,measured,dynamics,recoilRatios,branches};
+      // 关闭囚禁光后两条抛物线均从原点出发。较快的原子在保持中点越过 3 mm，终点又回到阱内。
+      const freeFlight = await sequence.run({n:3,gravity:true,recoil:false},
+        {...blueSequence(),loadMS:.1,holdMS:50,blueEnabled:false},
+        {initialStates:[0,0,0,0,0,.267, 0,0,0,0,0,.22, 0,0,.004,0,0,0]});
+      const checkpoints = {counts:freeFlight.summary, alive:Array.from(freeFlight.alive.slice(-3)),
+        trapped:Array.from(freeFlight.trapped.slice(-3)), midTrapped:freeFlight.metrics[freeFlight.timesMS.indexOf(25.1)].count,
+        masks:Object.fromEntries(Object.entries(freeFlight.checkpointRetained).map(([id,mask]) => [id,Array.from(mask)]))};
+      return {adapterInfo,measured,dynamics,recoilRatios,branches,checkpoints};
     } finally {mot.destroy(); sequence.destroy();}
   });
   console.log(JSON.stringify(evidence,null,2));
@@ -121,6 +128,8 @@ try {
   assert.ok(d.staticPosition < 1e-6 && d.staticVelocity < .001 && d.framesPhotons < .0001);
   assert.ok(d.sequencePosition < 1e-6 && d.sequenceVelocity < .001 && d.blue < .002 && d.green < .008);
   for (const ratio of Object.values(evidence.recoilRatios)) assert.ok(Math.abs(ratio-1) < .08);
+  assert.deepEqual(evidence.checkpoints, {counts:{N0:2,N1:1,N2:1},alive:[1,1,0],trapped:[1,1,0],midTrapped:1,
+    masks:{N0:[1,1,0],N1:[0,1,0],N2:[0,1,0]}});
 } finally {await browser.close();}
 
 const cpuBrowser = await chromium.launch({channel:'chrome',chromiumSandbox:true,args:[...args,'--disable-features=WebGPUService']});

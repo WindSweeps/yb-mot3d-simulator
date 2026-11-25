@@ -147,7 +147,8 @@ function observationGrid(program) {
 function atomFrom(initial, i, seed) {
   return { p: initial.slice(6*i, 6*i+3), v: initial.slice(6*i+3, 6*i+6),
     ...branchDraws(seed, i), depth:0, darkChannel:0,
-    rng: random((seed ^ Math.imul(i + 1, 0x9E3779B1) ^ 0xA341316C) >>> 0), live: true, held: true };
+    rng: random((seed ^ Math.imul(i + 1, 0x9E3779B1) ^ 0xA341316C) >>> 0),
+    live:true, held:true, retained:true };
 }
 
 export function prepareSequenceRun(input, config, options = {}) {
@@ -191,6 +192,7 @@ export function prepareSequenceRun(input, config, options = {}) {
     }
     const samples = n * (last - first + 1);
     Object.assign(result, {firstRecordedFrame:first,
+      checkpointRetained:{N0:new Uint8Array(n), N1:new Uint8Array(n), N2:new Uint8Array(n)},
       positionsM:new Float32Array(samples * 3), alive:new Uint8Array(samples), trapped:new Uint8Array(samples),
       blueRates:new Float32Array(samples), greenRates:new Float32Array(samples),
     });
@@ -202,12 +204,16 @@ export function prepareSequenceRun(input, config, options = {}) {
   return {model, field, program, grid, loadEnd, loadingRadiation, initial, result};
 }
 
-function frameMoments() {
-  return {count:0, live:0, dark:[0,0,0,0], rateSum:0, loadRateSum:0,
+function frameMoments(checkpointMask) {
+  return {count:0, live:0, retained:0, checkpointMask, dark:[0,0,0,0], rateSum:0, loadRateSum:0,
     mean:new Float64Array(6), delta:new Float64Array(6), scatter:new Float64Array(36)};
 }
 
-function writeAtom(result, k, pos, offsetP, vel, offsetV, live, trapped, blueRate, greenRate, m, darkChannel, loadingRadiation) {
+function writeAtom(result, k, pos, offsetP, vel, offsetV, live, trapped, blueRate, greenRate, m, darkChannel, loadingRadiation, retained) {
+  if (retained) {
+    m.retained++;
+    if (m.checkpointMask) m.checkpointMask[k % result.n] = 1;
+  }
   k -= (result.firstRecordedFrame ?? 0) * result.n;
   if (result.positionsM && k >= 0 && k < result.alive.length) {
     result.positionsM[3*k] = pos[offsetP];
@@ -276,7 +282,7 @@ function phaseSpaceDensityPerAtom(count, scatter) {
 
 function finishFrame(run, frame, m) {
   const {count, mean, scatter} = m, checkpoint = run.grid[frame].checkpoint;
-  if (checkpoint) run.result.summary[checkpoint] = m.live;
+  if (checkpoint) run.result.summary[checkpoint] = m.retained;
   const branchLossRate = count ? m.rateSum / count : 0;
   if (checkpoint === 'N0')
     run.result.loadBranchLossRate = run.loadingRadiation && count ? m.loadRateSum / count : branchLossRate;
@@ -307,20 +313,22 @@ export function writeSequenceGPUFrames(run, data, firstFrame, frameCount) {
       data.length < 12 * result.n * frameCount) throw new RangeError('GPU 返回的时序帧范围或长度无效。');
   let liveCount;
   for (let f = firstFrame; f < firstFrame + frameCount; f++) {
-    const m = frameMoments();
+    const m = frameMoments(result.checkpointRetained?.[run.grid[f].checkpoint]);
     const loadingRadiation = run.grid[f].checkpoint === 'N0' ? run.loadingRadiation : null;
     for (let i = 0; i < result.n; i++) {
       const offset = 12 * ((f - firstFrame) * result.n + i);
       const live = data[offset+3], trapped = data[offset+7];
       const blueRate = data[offset+8], greenRate = data[offset+9];
       const darkChannel = data[offset+10];
+      const retained = data[offset+11];
+      if ((retained !== 0 && retained !== 1) || retained > trapped) throw new Error('GPU 驻留检查结果与阱内状态不一致。');
       if (!Number.isInteger(darkChannel) || darkChannel < 0 || darkChannel > 3 ||
           (darkChannel && (live || blueRate || greenRate))) throw new Error('GPU 暗态与散射记录不一致。');
       if (!Number.isFinite(data[offset]+data[offset+1]+data[offset+2]+data[offset+4]+data[offset+5]+
           data[offset+6]+blueRate+greenRate) || blueRate < 0 || greenRate < 0 || (live !== 0 && live !== 1) ||
           (trapped !== 0 && trapped !== 1) || trapped > live) throw new Error('GPU 时序帧的相空间、散射率或留存标记无效。');
       writeAtom(result, f*result.n + i, data, offset, data, offset+4, live, trapped, blueRate, greenRate, m,
-        darkChannel, loadingRadiation);
+        darkChannel, loadingRadiation, retained);
     }
     finishFrame(run, f, m);
     liveCount = m.live;
@@ -352,12 +360,14 @@ export function simulateSequence(input, config, options = {}) {
 
   function frame(f) {
     configure(first, sequenceAt(program, grid[f].time));
-    const m = frameMoments();
+    const checkpoint = grid[f].checkpoint;
+    const m = frameMoments(result.checkpointRetained?.[checkpoint]);
     const loadingRadiation = grid[f].checkpoint === 'N0' ? run.loadingRadiation : null;
     for (let i = 0; i < n; i++) {
       const {p, v, live, darkChannel} = atoms[i], k = f*n + i;
       if (live) scattering(p, v, first, s);
-      writeAtom(result,k,p,0,v,0,live,live && inside(p,v),s.blueRate,s.greenRate,m,darkChannel,loadingRadiation);
+      writeAtom(result,k,p,0,v,0,live,live && inside(p,v),s.blueRate,s.greenRate,m,darkChannel,loadingRadiation,
+        checkpoint && atoms[i].retained);
     }
     finishFrame(run,f,m);
   }
@@ -412,7 +422,9 @@ export function simulateSequence(input, config, options = {}) {
     if (!point.freeze) propagate(grid[f-1].time, point);
     if (point.checkpoint) {
       for (const atom of atoms) {
-        atom.live = atom.live && atom.held;
+        atom.retained = atom.retained && atom.live && atom.held;
+        // 纯蓝保持期间的两次驻留检查只计数，光场持续作用于仍然明亮的原子。
+        if (point.checkpoint === 'N0' || !constantLight) atom.live = atom.retained;
         atom.held = true;
       }
     }

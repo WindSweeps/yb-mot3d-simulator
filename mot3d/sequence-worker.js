@@ -29,6 +29,7 @@ self.onmessage = async ({ data: {id, params, config, shader, observeAtMS} }) => 
       result.backend = backend;
     }
     const transfer = ['timesMS','positionsM','alive','trapped','blueRates','greenRates'].map(key => result[key].buffer);
+    for (const mask of Object.values(result.checkpointRetained)) transfer.push(mask.buffer);
     self.postMessage({id, result}, transfer);
   } catch (error) {
     self.postMessage({id, error: error.message});

@@ -97,8 +97,8 @@ function showReferenceLoss() {
   document.title = 'Yb · ' + heading;
   $('#sequence-wavelengths').textContent = blueOnly ? '¹⁷⁴Yb · 399 nm' : '¹⁷⁴Yb · 399 nm / 556 nm';
   $('#seq-green-branch').hidden = simulation === 'blue';
-  checkpointButtons[1].textContent = blueOnly ? '保持中点 N₁' : '纯绿接收 N₁';
-  checkpointButtons[2].textContent = blueOnly ? '保持结束 N₂' : '压缩结束 N₂';
+  checkpointButtons[1].textContent = blueOnly ? '中点驻留 N₁' : '纯绿接收 N₁';
+  checkpointButtons[2].textContent = blueOnly ? '末端驻留 N₂' : '压缩结束 N₂';
   $('#seq-total-label').textContent = blueOnly ? '保持留存 N₂ / N₀' : '转移和压缩合计 N₂ / N₀';
   $('#seq-transfer-reference').hidden = $('#seq-loading-reference').hidden = blueOnly;
   form.elements.greenWaistMM.disabled = blueOnly;
@@ -124,11 +124,15 @@ function showAtoms(output, count) {
 
 function refreshCurves() {
   const points = [];
+  const constants = population?.timeConstants();
   if (population) {
     const end = program.stages[0].endMS;
+    const crossing = constants.loss.status === 'reached' ? end + constants.loss.timeMS : null;
     for (const [frame, time] of result.timesMS.entries()) {
       // 关源后，帧内权重连续演化，阱内轨迹数只在下一帧更新。
       if (frame > 0 && time > end) {
+        if (crossing > result.timesMS[frame - 1] && crossing < time)
+          points.push(cloudReadout(program, result, population, crossing, frame - 1));
         const before = cloudReadout(program, result, population, time, frame - 1);
         points.push({...before, leftLimit:true});
       }
@@ -139,7 +143,7 @@ function refreshCurves() {
       }
     }
   }
-  curves.setSeries(points, program.stages, population?.timeConstants());
+  curves.setSeries(points, program.stages, constants, population?.loaded);
 }
 
 function summarize() {

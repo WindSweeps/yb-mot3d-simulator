@@ -60,7 +60,9 @@ function packFrames({field,program,grid}) {
     const end = sequenceAt(program,point.time), k = f*16;
     // 纯蓝装载和保持使用同一恒定光场；关源时刻只改变原子数方程。
     const opticalStage = stage.id === 'hold' ? 0 : stageIndex;
-    flags.set([opticalStage, Number(Boolean(point.checkpoint))], k);
+    const checkpoint = Boolean(point.checkpoint);
+    const observeOnly = checkpoint && program.config.mode === 'blue-only' && point.checkpoint !== 'N0';
+    flags.set([opticalStage, Number(checkpoint), Number(observeOnly)], k);
     values.set([stepMS*.001,(start-stage.startMS)/stage.durationMS,stepMS/stage.durationMS,0,
       field.blue.factor*end.bluePowersMW[0], field.blue.factor*end.bluePowersMW[4],
       field.green.factor*end.greenPowersMW[0], field.green.factor*end.greenPowersMW[4],
@@ -149,7 +151,7 @@ export async function createSequenceGpu(source) {
   try { adapter = await navigator.gpu.requestAdapter(); }
   catch (error) { throw new SequenceDeviceUnavailable('WebGPU 适配器不可用。' + error.message); }
   if (!adapter) return null;
-  if (!source?.includes('fn resolvedLineRates(')) throw new Error('网页已更新，请刷新后重新计算。');
+  if (!source?.includes('fn recordCheckpoint(')) throw new Error('网页已更新，请刷新后重新计算。');
   let device;
   try { device = await adapter.requestDevice(); }
   catch (error) { throw new SequenceDeviceUnavailable('WebGPU 设备无法启动。' + error.message); }

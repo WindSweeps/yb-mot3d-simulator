@@ -136,6 +136,7 @@ near(loadPopulation(mixedLoading.timeMS, flux, 1, alpha, beta), steady*(1 - 1/Ma
 // 10 ms 接收和前段压缩共同提供积分损失，阈值位于两个回放帧之间。
 const switched = constants({greenAlpha:10, compressAlpha:27}).loss;
 assert.equal(switched.status, 'reached');
+assert.equal(switched.bracketMS, undefined);
 near(switched.timeMS, 11 + 900/27);
 const betaHold = 1e-8, n0 = flux*5;
 const pairOnly = constants({handoffBeta:betaHold, greenBeta:betaHold, compressBeta:betaHold}).loss;
@@ -155,7 +156,10 @@ for (const [speed, dropMS] of [[.05,60],[.03002,100]]) {
   const drift = simulateSequence({...params,n:3}, driftConfig,
     {initialStates:[0,0,0,0,0,0, 0,0,0,speed,0,0, 0,0,0,speed,0,0]});
   const pop = sequencePopulation(compileSequence(driftConfig), drift, {...lossless,holdAlpha:0,holdBeta:0});
-  assert.deepEqual(pop.timeConstants().loss, {status:'reached', timeMS:dropMS});
+  const crossing = pop.timeConstants().loss;
+  assert.equal(crossing.timeMS, dropMS);
+  const firstBelow = drift.metrics.findIndex((metric, i) => drift.timesMS[i] >= driftConfig.loadMS && metric.count <= 1);
+  assert.deepEqual(crossing.bracketMS, [drift.timesMS[firstBelow-1] - driftConfig.loadMS, dropMS]);
 }
 
 // 蓝光恢复力使从阱边向外运动的原子重新进入计数范围。末帧回升仍须报告首次降至阈值的时刻。
@@ -164,5 +168,5 @@ const returning = simulateSequence({...params,n:1}, blueReturn, {initialStates:[
 assert.deepEqual(returning.summary, {N0:1,N1:1,N2:1});
 assert.equal(returning.metrics[2].count, 0);
 const beforeReturn = sequencePopulation(compileSequence(blueReturn), returning, {...lossless,holdAlpha:0,holdBeta:0});
-assert.deepEqual(beforeReturn.timeConstants().loss, {status:'reached', timeMS:.5});
+assert.deepEqual(beforeReturn.timeConstants().loss, {status:'reached', timeMS:.5, bracketMS:[0,.5]});
 console.log('已验证宋博组表 II 系数、式 (2) 与 (3)、真实轨迹的阱内计数及双体衰减。');
