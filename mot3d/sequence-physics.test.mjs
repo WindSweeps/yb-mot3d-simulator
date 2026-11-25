@@ -40,6 +40,19 @@ const dark = { ...song, blueEnabled:false, greenEnabled:false, loadMS:1, handoff
 const launches = [0,0,0,0,0,.03, 0,0,0,0,0,-.03, .004,0,0,0,0,0];
 const ballistic = simulateSequence({n:3,recoil:true,gravity:true},dark,{initialStates:launches});
 assert.deepEqual(ballistic.summary,{N0:2,N1:2,N2:2});
+const diagnostics = ballistic.samplingDiagnostics.stages;
+assert.deepEqual(diagnostics.N0.fromSource, diagnostics.N0.fromPrevious);
+assert.equal(diagnostics.N2.fromSource.fraction, 2/3);
+assert.equal(diagnostics.N2.fromSource.entrants, 3);
+close(diagnostics.N2.fromSource.mcse, Math.sqrt(2/27), 1e-15);
+assert.deepEqual(diagnostics.N2.fromPrevious, {entrants:2, fraction:1, mcse:0});
+assert.equal(diagnostics.N2.effectiveSampleSize, 3);
+assert.equal(diagnostics.N2.sumWeights, 3);
+assert.deepEqual(diagnostics.N2.statusWeightBreakdown, {captured:2, notCaptured:1});
+assert.equal(diagnostics.N2.capturedEffectiveSampleSize, 2);
+assert.equal(diagnostics.N2.maxWeightShare, 1/3);
+assert.equal(diagnostics.N2.lowCapturedSampleSize, true);
+assert.equal(diagnostics.N2.highMaxWeightShare, true);
 const last = (ballistic.frameCount-1)*3, t = ballistic.timesMS.at(-1)/1000;
 for (let i=0; i<2; i++) {
   close(ballistic.positionsM[3*(last+i)+2],launches[6*i+5]*t-.5*C.gravity*t*t,1e-10);
@@ -50,6 +63,7 @@ assert.ok(ballistic.blueRates.every(r=>r===0) && ballistic.greenRates.every(r=>r
 close(ballistic.metrics.at(-1).temperatureUK,C.mass*(.03**2+.03**2)*1e6/(3*C.kB),1e-9);
 const empty = simulateSequence({n:1},dark,{initialStates:[.004,0,0,0,0,0]});
 assert.deepEqual(empty.summary,{N0:0,N1:0,N2:0});
+assert.deepEqual(empty.samplingDiagnostics.stages.N2.fromPrevious, {entrants:0,fraction:null,mcse:null});
 assert.equal(empty.metrics.at(-1).temperatureUK,null);
 assert.equal(empty.metrics.at(-1).centroidMM,null);
 
@@ -73,6 +87,16 @@ for (let k=0;k<9;k++) close(reference.positionsM.at(k-9),refined.positionsM.at(k
 const batch = simulateSequence({ n:32, seed:399174 },song);
 assert.ok(batch.N0>0 && batch.N2>0 && batch.N0>=batch.N1 && batch.N1>=batch.N2);
 const replay = simulateSequence({ n:32, seed:399174 },song);
+assert.equal(batch.samplingDiagnostics.stages.N2.highMaxWeightShare, false);
+for (const [stage, time] of [['N0',song.loadMS], ['N1',song.loadMS+song.handoffMS+song.greenMS], ['N2',program.durationMS]]) {
+  const start = batch.n * batch.timesMS.indexOf(time);
+  const mask = batch.alive.subarray(start, start+batch.n);
+  const retained = mask.reduce((sum, flag) => sum + flag, 0);
+  const mean = retained/mask.length;
+  const residualSquares = mask.reduce((sum, flag) => sum + (flag-mean)**2, 0);
+  assert.equal(batch.samplingDiagnostics.stages[stage].captured, retained);
+  close(batch.samplingDiagnostics.stages[stage].fromSource.mcse, Math.sqrt(residualSquares)/mask.length, 1e-15);
+}
 assert.deepEqual(batch.positionsM,replay.positionsM);
 assert.ok(batch.greenRates.some(r=>r>0));
 for (let f=0; f<batch.frameCount; f++) {

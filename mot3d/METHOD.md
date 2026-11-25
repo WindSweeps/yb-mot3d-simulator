@@ -89,6 +89,12 @@ R_{jq}=\frac{\Gamma}{2}\frac{s_jw_{jq}}{1+\sum_l s_l+4(\Delta-\mathbf k_j\cdot\m
 
 Worker 复用计算管线，分批提交时间步。位置、速度、随机状态与轨迹留在显存，积分结束后一次读回。调参时在两批之间取消旧任务，只显示最近一次参数对应的结果。浏览器无法提供 WebGPU 适配器时，Worker 使用 JavaScript 双精度积分。网页显示的耗时从发送参数开始，直到收到本次计算结果。
 
+### 双色时序的轨迹抽样诊断
+
+[双色 MOT 实验时序](./sequence.html)的 CPU 和 WebGPU 后台在计算结束时，按 cold-atom-mc-optimizer r3（2026-11-23.3）的方法统计装载结束、纯绿接收结束和压缩结束三个检查点。点击「导出时序」，JSON 中的 `samplingDiagnostics` 给出相对于全部入射轨迹的捕获率，以及相对于上一检查点的条件留存率。每个比例均附分母和蒙特卡洛标准误。
+
+内置冷束独立等权抽样。设分母为 $n$，观察到的比例为 $p$，比例标准误估计为 $\sqrt{p(1-p)/n}$。零分母记为 `null`。r3 对捕获有效样本量低于 200 或单条轨迹占总抽样权重超过 5% 的情况分别给出标记。导出文件中的 `estimatedAtoms` 使用含单体与双体损失的物理原子数权重。
+
 ## 参考
 
 - S. Eckel, D. S. Barker, E. B. Norrgard, J. Scherschligt, *PyLCP: A Python package for computing laser cooling physics*, §2.3式(35)、§3.2–3.3。已核对[作者/NIST全文](https://tsapps.nist.gov/publication/get_pdf.cfm?pub_id=931233)。该文给出旋转偏振、共享饱和力及其适用范围；这里以JS重新实现并采用上述高斯扩散。

@@ -270,6 +270,7 @@ $('#sequence-export').addEventListener('click', () => {
   const preset = editor.getPreset();
   const file = { format:formatId, presetId:preset.id, presetName:preset.name, config:editor.getConfig(),
     params, loading, imaging:imaging.getSettings(), summary:result?.summary ?? null };
+  if (result) file.samplingDiagnostics = result.samplingDiagnostics;
   if (population) {
     file.estimatedAtoms = population.estimatedAtoms;
   }

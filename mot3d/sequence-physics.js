@@ -1,5 +1,6 @@
 import { BEAM_DIRECTIONS, BLUE_TRANSITION, CONSTANTS as C, compile, evaluate, random, sampleInitialStates } from './physics.js';
 import { compileSequence, sequenceAt } from './sequence.js';
+import { sequenceSamplingDiagnostics } from './sequence-diagnostics.js';
 
 const greenK = 2 * Math.PI / 555.8e-9;
 export const GREEN_TRANSITION = Object.freeze({ k: greenK, gamma: 2 * Math.PI * 180000, lande: 1.5, recoil: C.hbar * greenK / C.mass });
@@ -199,6 +200,7 @@ export function writeSequenceGPUFrames(run, data, firstFrame, frameCount) {
 
 export function finishSequenceRun(run, started) {
   if (run.result.metrics.length !== run.result.frameCount) throw new Error('时序输出帧不完整。');
+  run.result.samplingDiagnostics = sequenceSamplingDiagnostics(run.result.n, run.result.summary);
   return Object.assign(run.result, run.result.summary, {elapsedMS:performance.now()-started});
 }
 
