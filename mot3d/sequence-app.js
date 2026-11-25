@@ -10,6 +10,8 @@ import { IMAGING_DEFAULTS } from './sequence-imaging.js';
 import { mountSequenceDock } from './sequence-dock.js';
 import { mountSequenceCurves } from './sequence-curves.js';
 import { mountSequenceOptimization } from './sequence-optimization.js';
+import { availableEngines, defaultEngine } from './engines.js';
+import { mountEnginePanel } from './engine-panel.js';
 
 // 时序与求解器持续更新同一组控件，停靠过程可以移动它们的父节点。
 const elements = new Map(Array.from(document.querySelectorAll('[id]'), el => ['#' + el.id, el]));
@@ -35,9 +37,11 @@ const computeShader = $('#sequence-compute').textContent;
 const requestedPreset = new URLSearchParams(location.search).get('preset');
 const initialPreset = SEQUENCE_PRESETS.find(preset => preset.id === requestedPreset) ?? SEQUENCE_PRESETS[0];
 let params = await initialInputs(), program = compileSequence(initialPreset.config), timeMS = 0;
+let simulation = simulationType(program);
 let geometry = derive(params);
 let loading = { flux:params.incidentFlux ?? DEFAULT_FLUX };
 const loadingByMode = new Map();
+const engineBySimulation = new Map();
 let worker = null, timer = 0, job = 0, result = null, scene = null, population = null;
 let editValid = true, suspended = false, started = 0;
 let observeAtMS, importedObserveAtMS;
@@ -51,7 +55,7 @@ async function initialInputs() {
   // 时序页单独设置采样数；实验文件导入时使用文件中明确保存的数量。
   const adapter = await navigator.gpu?.requestAdapter().catch(() => null);
   const n = adapter ? (matchMedia('(max-width: 800px)').matches ? 4096 : 16384) : 1024;
-  return { ...base, n, greenWaistMM: base.waistMM };
+  return { ...base, engine:base.engine ?? defaultEngine, n, greenWaistMM: base.waistMM };
 }
 
 function fillLoadingInputs() {
@@ -92,7 +96,7 @@ function showReferenceLoss() {
   $('#sequence-heading').textContent = heading;
   document.title = 'Yb · ' + heading;
   $('#sequence-wavelengths').textContent = blueOnly ? '¹⁷⁴Yb · 399 nm' : '¹⁷⁴Yb · 399 nm / 556 nm';
-  $('#seq-green-branch').hidden = blueOnly;
+  $('#seq-green-branch').hidden = simulation === 'blue';
   checkpointButtons[1].textContent = blueOnly ? '保持中点 N₁' : '纯绿接收 N₁';
   checkpointButtons[2].textContent = blueOnly ? '保持结束 N₂' : '压缩结束 N₂';
   $('#seq-total-label').textContent = blueOnly ? '保持留存 N₂ / N₀' : '转移和压缩合计 N₂ / N₀';
@@ -199,6 +203,18 @@ function showFrame(t) {
     : '入射样本 ' + params.n + ' 个，装载轨迹积分 ' + windowMS + ' ms。当前读数取 r < 3 mm、速率 < 1 m/s 的样本，阶段末留存还要求在末段持续满足两项条件。';
 }
 
+function simulationType(compiled) {
+  const hasGreen = sequenceLossStages(compiled).some(stage => stage.light === 'green' || stage.light === 'twoColor');
+  return hasGreen ? 'two-color' : 'blue';
+}
+
+const enginePanel = mountEnginePanel($('#sequence-engine'), {
+  simulation, engine:params.engine,
+  onSelect(engine) {
+    params = {...params, engine};
+    recalculate();
+  },
+});
 const curves = mountSequenceCurves($('#sequence-curves'), t => { editor.pause(); editor.setTime(t); });
 const editor = mountSequenceEditor($('#sequence-editor'), {
   initialPreset,
@@ -221,6 +237,12 @@ const editor = mountSequenceEditor($('#sequence-editor'), {
       loading = {...loadingByMode.get(compiled.config.mode), flux:loading.flux};
       fillLoadingInputs();
     }
+    const nextSimulation = simulationType(compiled);
+    if (!suspended && simulation !== nextSimulation) {
+      engineBySimulation.set(simulation, params.engine);
+      params = {...params, engine:engineBySimulation.get(nextSimulation) ?? defaultEngine};
+    }
+    simulation = nextSimulation;
     program = compiled;
     if (observeAtMS > program.durationMS) observeAtMS = undefined;
     if (!suspended) recalculate();
@@ -271,6 +293,7 @@ function loadExperiment(experiment, preset, targetMS) {
   suspended = true;
   try {
     loadingByMode.set(program.config.mode, loading);
+    engineBySimulation.set(simulation, params.engine);
     params = structuredClone(experiment.params);
     loading = {...experiment.loading};
     fillInputs();
@@ -306,6 +329,7 @@ function cancelRun() {
 }
 
 function recalculate() {
+  enginePanel.update({simulation, engine:params.engine});
   showReferenceLoss();
   cancelRun();
   if (!editValid || !form.checkValidity()) {
@@ -339,10 +363,15 @@ function recalculate() {
           progress + '%' + (data.reason ? ' · ' + data.reason : ''));
         return;
       }
+      if (data.result.engine !== params.engine) {
+        fail('计算结果的引擎与当前选择不一致。请刷新网页后重试。');
+        return;
+      }
       result = data.result;
       worker.terminate(); worker = null;
       summarize(); showFrame(timeMS); editor.setEnabled(true);
-      status('计算完成 · ' + result.backend + ' · ' + result.n.toLocaleString('zh-CN') + ' 条入射轨迹 · ' +
+      const engineName = availableEngines(simulation).find(engine => engine.id === result.engine).label;
+      status('计算完成 · ' + engineName + ' · ' + result.backend + ' · ' + result.n.toLocaleString('zh-CN') + ' 条入射轨迹 · ' +
         ((performance.now() - started) / 1000).toFixed(2) + ' s');
     };
     worker.postMessage({id, params, config:program.config, shader:computeShader, observeAtMS});

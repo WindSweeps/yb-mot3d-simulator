@@ -19,7 +19,7 @@ function parameterBlock(model, steps, frameCount, firstHeldStep, dt) {
     dt, inverseWaistSquared, gravityZ, Number(params.recoil),
     ...fieldSlope, derived.recoilVelocityMS,
     ...bias, 2 * detuning / gamma,
-    4 * Math.PI / (wavelength * gamma), 2 * muB / (hbar * gamma), gamma / 2, 0,
+    4 * Math.PI / (wavelength * gamma), 2 * muB / (hbar * gamma), gamma / 2, Number(params.engine === 'rate-equations'),
     ...BEAM_DIRECTIONS[0], HELICITIES[0],
     ...BEAM_DIRECTIONS[2], HELICITIES[2],
     ...BEAM_DIRECTIONS[4], HELICITIES[4],
@@ -178,6 +178,7 @@ export async function createGpuSimulation(shaderSource) {
   if (!navigator.gpu) return null;
   const adapter = await navigator.gpu.requestAdapter();
   if (!adapter) return null;
+  if (!shaderSource?.includes('fn resolvedLineRates(')) throw new Error('网页已更新，请刷新后重新计算。');
   const device = await adapter.requestDevice();
   let loss = null;
   device.lost.then(info => { loss = new Error('WebGPU 设备连接已断开。' + info.message); });

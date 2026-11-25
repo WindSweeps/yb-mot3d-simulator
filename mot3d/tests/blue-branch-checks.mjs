@@ -1,13 +1,14 @@
 // 当原子静止于平衡光束中心时，散射率恒定，暗态存活率和两条损失通道可解析求得。
-export async function checkBlueBranches(run) {
+export async function checkBlueBranches(run, engine = 'lightweight') {
   const n = 2048, durationMS = 100;
-  const params = {n, durationMS, dtUS:100, detuningMHz:0, gravity:false, recoil:false, mainCurrentA:0,
+  const params = {n, engine, durationMS, dtUS:100, detuningMHz:0, gravity:false, recoil:false, mainCurrentA:0,
     waistMM:6, powersMW:Array(6).fill(15), seed:7217};
   const result = await run(params, {initialStates:new Float64Array(6*n), frameCount:32});
   const gamma = 2 * Math.PI * 29.13e6;
   const saturationIntensity = Math.PI * 6.62607015e-34 * 299792458 * gamma / (3 * (399e-9)**3);
   const saturation = 6 * 2 * .015 / (Math.PI * .006**2 * saturationIntensity);
-  const excitedFraction = .5 * saturation / (1 + saturation);
+  // 六束等强光的三个激发子能级具有相等布居，各自的 Wq/Γ 为总饱和参数的 1/6。
+  const excitedFraction = .5 * saturation / (1 + (engine === 'rate-equations' ? 2/3 : 1) * saturation);
   const lossProbability = -Math.expm1(-excitedFraction * (6.18 + .37) * durationMS / 1000);
   const {darkP0, darkP2, retained, escaped} = result.summary;
   for (const [observed, partialRate] of [[darkP0, 6.18], [darkP2, .37]]) {

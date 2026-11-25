@@ -1,6 +1,8 @@
 import * as Physics from "./physics.js";
 import { DEFAULT_FLUX } from "./fluorescence.js";
 import { mountFluorescence } from "./fluorescence-view.js";
+import { availableEngines, validateEngine } from "./engines.js";
+import { mountEnginePanel } from "./engine-panel.js";
 
 const { DEFAULTS, derive } = Physics;
 const $ = (selector) => document.querySelector(selector);
@@ -40,6 +42,14 @@ const fluorescence = mountFluorescence(fluorescencePanel, () => {
   scene?.setFluorescenceFlux(fluorescence.getFlux());
   if (result && !fluorescencePanel.hidden) fluorescence.show(selectedFrame());
 });
+const enginePanel = mountEnginePanel($("#mot-engine-panel"), {
+  simulation: "blue", engine: params.engine,
+  onSelect(engine) {
+    params.engine = engine;
+    parametersChanged({immediate: true});
+  },
+});
+const blueEngineLabel = id => availableEngines("blue").find(engine => engine.id === id).label;
 
 const scalarSpecs = [
   { key: "detuningMHz", label: "共同失谐 Δ", unit: "MHz", min: -100, max: 10, step: 1, target: "#light-controls", range: true },
@@ -189,6 +199,7 @@ function announce(message) {
 }
 
 function syncControls(except = null) {
+  enginePanel.update({simulation: "blue", engine: params.engine});
   controls.forEach(({ spec, number, range }) => {
     const value = String(valueAt(spec.key));
     if (number !== except) number.value = value;
@@ -354,7 +365,7 @@ function receiveSimulation(event) {
   const duration = result.times[result.frameCount - 1];
   showTime(observationTimeS === null ? 1 : Math.min(1, observationTimeS / duration), true);
   showMetrics();
-  setStatus("计算完成 · " + result.summary.backend + " · seed " + result.params.seed);
+  setStatus("计算完成 · " + blueEngineLabel(result.engine) + " · " + result.summary.backend + " · seed " + result.params.seed);
   $("#play").disabled = false;
   $("#timeline").disabled = false;
   $("#save-baseline").disabled = false;
@@ -463,7 +474,7 @@ function updateComparison() {
   if (!baseline) return;
   $("#save-baseline").textContent = "更新基准 A";
   const total = baseline.params.powersMW.reduce((sum, power) => sum + power, 0);
-  $("#baseline-caption").textContent = "A：Δ " + format(baseline.params.detuningMHz, 0) + " MHz · " + format(total, 1) + " mW · 主电流 " + format(baseline.params.mainCurrentA, 2) + " A";
+  $("#baseline-caption").textContent = "A · " + blueEngineLabel(baseline.params.engine) + " · Δ " + format(baseline.params.detuningMHz, 0) + " MHz · " + format(total, 1) + " mW · 主电流 " + format(baseline.params.mainCurrentA, 2) + " A";
   if (!result || busy) return;
   const now = result.summary, old = baseline.summary;
   $("#compare-retained").textContent = signed((now.retainedFraction - old.retainedFraction) * 100, 1) + " 个百分点";
@@ -537,7 +548,8 @@ function restoredParams(saved) {
   const next = clone(DEFAULTS);
   Object.entries(next).forEach(([key, fallback]) => {
     const candidate = saved[key];
-    if (Array.isArray(fallback) && Array.isArray(candidate) && candidate.length === fallback.length && candidate.every(Number.isFinite)) next[key] = candidate.slice();
+    if (key === "engine" && candidate !== undefined) next.engine = validateEngine(candidate);
+    else if (Array.isArray(fallback) && Array.isArray(candidate) && candidate.length === fallback.length && candidate.every(Number.isFinite)) next[key] = candidate.slice();
     else if (typeof fallback === "number" && Number.isFinite(candidate)) next[key] = candidate;
     else if (typeof fallback === "boolean" && typeof candidate === "boolean") next[key] = candidate;
     else if (key === "mainAxis" && ["y", "z"].includes(candidate)) next[key] = candidate;

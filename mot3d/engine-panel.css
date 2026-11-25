@@ -1,0 +1,58 @@
+.engine-panel {
+  container-type: inline-size;
+  min-width: 0;
+  color: var(--text);
+}
+.engine-panel .engine-picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  color: var(--text);
+  font: 600 var(--body)/1.5 var(--sans);
+}
+.engine-picker select {
+  flex: 1 1 12rem;
+  min-width: 0;
+  max-width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-deep);
+  color: var(--text);
+  font: 500 var(--meta)/1.5 var(--sans);
+}
+.engine-panel .engine-intro,
+.engine-panel .engine-notes p,
+.engine-panel .engine-scheme figcaption {
+  margin: 0;
+  color: var(--muted);
+  font: 400 var(--meta)/1.65 var(--sans);
+  overflow-wrap: anywhere;
+}
+.engine-panel .engine-intro { margin: 9px 0 12px; }
+.engine-principles { display: grid; gap: 12px; align-items: start; }
+.engine-scheme {
+  display: grid;
+  justify-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 10px;
+  margin: 0;
+  background: var(--panel-deep);
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+}
+.engine-scheme img { display: block; width: auto; max-width: 100%; height: 12rem; object-fit: contain; }
+.engine-panel .engine-scheme figcaption { max-width: 30rem; }
+.engine-equations { display: grid; gap: 8px; min-width: 0; margin: 0; }
+.engine-equation { min-width: 0; border-left: 2px solid var(--line); padding-left: 9px; }
+.engine-equation dt { color: var(--cyan); font: 500 var(--meta)/1.5 var(--sans); }
+.engine-equation dd { overflow-x: auto; min-width: 0; margin: 4px 0 0; padding-block: 2px; }
+.engine-equation math { display: block math; width: max-content; margin: 0; color: var(--text); font-size: var(--body); }
+.engine-notes { margin-top: 12px; }
+.engine-notes summary { cursor: pointer; color: var(--muted); font: 500 var(--meta)/1.6 var(--sans); }
+.engine-panel .engine-notes[open] p { margin-top: 6px; }
+@container (min-width: 32rem) {
+  .engine-principles { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; }
+}

@@ -16,14 +16,24 @@
 
 每束光取穿过原点的准直高斯束，s_j=2P_j exp(−2r⊥²/w²)/(πw² I_sat)。局部量子化轴沿完整 B 向量；c_j=k̂_j·B̂，h_j 为该束 helicity，三个分量的权重为 w₊=(1+h_j c_j)²/4，w₀=(1−c_j²)/2，w₋=(1−h_j c_j)²/4。
 
-采用 PyLCP §2.3、式(35)的 J=0→1 启发式共享饱和形式：
+网页默认使用轻量散射模型。每种颜色采用 PyLCP §2.3、式(35)的 J=0→1 共享饱和形式。以 399 nm 为例，
 
 \[
 R_{jq}=\frac{\Gamma}{2}\frac{s_jw_{jq}}{1+\sum_l s_l+4(\Delta-\mathbf k_j\cdot\mathbf v-q\mu_B|\mathbf B|/\hbar)^2/\Gamma^2},\quad
 \mathbf a_{\rm opt}=\frac{\hbar k}{m}\sum_{j,q}R_{jq}\hat{\mathbf k}_j.
 \]
 
-动力学加入−gẑ。轨迹用显式中点法处理确定性漂移，每步叠加高斯反冲扩散，其速度增量协方差为
+选择**稳态速率方程**时，399 nm 模拟使用 ¹S₀ 基态和 ¹P₁ 的三个磁子能级。含 556 nm 的时序再加入 ³P₁ 的三个磁子能级。用下标 q 同时标记激发态所属的跃迁和磁量子数。令 δⱼq 为包含多普勒、塞曼频移的有效角频率失谐，Γq 为该跃迁的自然衰变率。瞬时光场中的受激跃迁率与布居满足
+
+\[
+W_{jq}=\frac{\Gamma_q}{2}\frac{s_j w_{jq}}{1+(2\delta_{jq}/\Gamma_q)^2},
+\quad W_q=\sum_j W_{jq},\quad
+W_q(p_g-p_q)=\Gamma_q p_q,\quad p_g+\sum_q p_q=1.
+\]
+
+每束光按净吸收率 ∑q Wⱼq(p_g−p_q) 贡献平均动量。两种颜色同时照明时，全部磁子能级共享同一个基态布居。总自发散射率为 ∑q Γq p_q。这个模型假设内部布居在每次计算光力时已达到局部稳态，忽略能级间相干性。磁场恰为零时，速率方程采用实验室 +Y 方向分解偏振。两种引擎均按各自算出的散射率计算暗态泄漏和反冲。反冲采用净散射率近似。
+
+动力学加入−gẑ。轨迹用显式中点法处理确定性漂移，399 nm 光的高斯反冲扩散具有以下速度增量协方差
 
 \[
 \operatorname{Cov}(\delta\mathbf v)=v_r^2\,dt\left[\sum_j R_j\hat{\mathbf k}_j\hat{\mathbf k}_j^T+\frac{\sum_jR_j}{3}\mathbf I\right].

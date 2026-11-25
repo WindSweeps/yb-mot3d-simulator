@@ -27,7 +27,7 @@ function packApparatus({model,field,program}) {
     normalizedMHzFactor*load.blueDetuningMHz/blue.transition.gamma, normalizedMHzFactor*load.greenDetuningMHz/green.transition.gamma,
     normalizedMHzFactor*receive.greenDetuningMHz/green.transition.gamma, normalizedMHzFactor*final.greenDetuningMHz/green.transition.gamma,
     load.gradientGCM, receive.gradientGCM, final.gradientGCM, ['linear','smooth','geometric'].indexOf(c.powerRamp ?? 'linear'),
-    DARK_BRANCHES.blueP0, DARK_BRANCHES.blueP2, DARK_BRANCHES.greenP0, 0,
+    DARK_BRANCHES.blueP0, DARK_BRANCHES.blueP2, DARK_BRANCHES.greenP0, Number(model.params.engine === 'rate-equations'),
   ]);
 }
 
@@ -144,12 +144,12 @@ async function integrate(device,pipeline,layout,input,config,options) {
 }
 
 export async function createSequenceGpu(source) {
-  if (!source.includes('fn advanceBranch(')) throw new Error('网页已更新，请刷新后重新计算。');
   if (!navigator.gpu) return null;
   let adapter;
   try { adapter = await navigator.gpu.requestAdapter(); }
   catch (error) { throw new SequenceDeviceUnavailable('WebGPU 适配器不可用。' + error.message); }
   if (!adapter) return null;
+  if (!source?.includes('fn resolvedLineRates(')) throw new Error('网页已更新，请刷新后重新计算。');
   let device;
   try { device = await adapter.requestDevice(); }
   catch (error) { throw new SequenceDeviceUnavailable('WebGPU 设备无法启动。' + error.message); }

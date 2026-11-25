@@ -25,7 +25,7 @@ function observeRuns() {
         });
       }
       ids.set(this, request.id);
-      probe.jobs.push({id:request.id, n:request.params.n});
+      probe.jobs.push({id:request.id, n:request.params.n, engine:request.params.engine});
     }
     return post.apply(this,args);
   };
@@ -253,6 +253,119 @@ async function checkPopulation(page, high) {
   return full.population;
 }
 
+async function checkEngines(page) {
+  const select=page.locator('#sequence-engine [data-engine-select]');
+  const lastId=()=>page.evaluate(()=>window.sequenceScaleTest.jobs.at(-1).id);
+  async function exportExperiment() {
+    const download=page.waitForEvent('download');
+    await page.locator('#sequence-export').click();
+    return JSON.parse(await readFile(await (await download).path(),'utf8'));
+  }
+  async function importExperiment(experiment) {
+    const previous=await lastId();
+    await page.locator('#sequence-file').setInputFiles({name:'experiment.json',mimeType:'application/json',
+      buffer:Buffer.from(JSON.stringify(experiment))});
+    await waitForResult(page,previous);
+  }
+  async function chooseEngine(engine) {
+    const previous=await lastId();
+    await page.getByRole('link',{name:'模拟引擎',exact:true}).click();
+    await select.selectOption(engine);
+    await waitForResult(page,previous);
+    assert.equal(await page.evaluate(()=>window.sequenceScaleTest.result.engine),engine);
+    assert.equal(await page.evaluate(()=>window.sequenceScaleTest.jobs.at(-1).engine),engine);
+    const label=await select.locator('option:checked').textContent();
+    assert.ok((await page.locator('#sequence-compute-status').textContent()).includes(label));
+  }
+  async function checkGuide(simulation, engine) {
+    const panel=page.locator('#sequence-engine');
+    await page.getByRole('link',{name:'模拟引擎',exact:true}).click();
+    await panel.locator('img').evaluate(image=>image.decode());
+    assert.ok((await panel.locator('img').getAttribute('src')).endsWith(simulation+'-'+engine+'.svg'));
+    assert.ok(await panel.locator('math').count()>=3);
+    assert.equal(await panel.getAttribute('data-simulation'),simulation);
+  }
+  const reference=await exportExperiment();
+  assert.equal(reference.params.engine,'lightweight');
+  Object.assign(reference.params,{n:96,sourceDistanceMM:.3,sourceRadiusMM:.1,sourceSpeed:.1,
+    sourceSpread:.02,sourceTempMK:.001,recoil:false});
+  Object.assign(reference.config,{loadMS:1,handoffMS:.2,greenMS:.8,compressMS:2});
+  await importExperiment(reference);
+  await checkGuide('two-color','lightweight');
+  const meanBlue=()=>page.evaluate(()=>{
+    const {trapped,blueRates,n}=window.sequenceScaleTest.result;
+    let sum=0,count=0;
+    for(let i=0;i<n;i++) if(trapped[i]) {sum+=blueRates[i];count++;}
+    if(!count) throw new Error('初始阱内没有可用于核对散射率的原子。');
+    return sum/count;
+  });
+  const lightRate=await meanBlue();
+  await chooseEngine('rate-equations');
+  await checkGuide('two-color','rate-equations');
+  const rate=await meanBlue();
+  assert.ok(Math.abs(rate-lightRate)>.001*lightRate,JSON.stringify({lightRate,rate}));
+  const selected=await exportExperiment();
+  assert.equal(selected.params.engine,'rate-equations');
+  await page.getByRole('tab',{name:'梯度优化'}).click();
+  const opt=page.locator('#seq-opt-form');
+  await opt.locator('[name=objective]').selectOption('optical.blue.scattering');
+  await opt.locator('[name=timeMS]').fill('0');
+  await opt.locator('[name=maxEvaluations]').fill('2');
+  await opt.locator('.seq-opt-variables > summary').click();
+  await opt.locator('[name=variable][value=compressMHz]').uncheck();
+  await opt.locator('[name=variable][value=greenEnabled]').check();
+  await opt.locator('[data-opt=start]').click();
+  await page.waitForFunction(()=>document.querySelector('[data-opt=stop]').disabled &&
+    document.querySelector('[data-opt=initial]').hasAttribute('data-value'));
+  const score=Number(await page.locator('[data-opt=initial]').getAttribute('data-value'));
+  assert.ok(Math.abs(score/rate-1)<.001,JSON.stringify({rate,score}));
+  const best=Number(await page.locator('[data-opt=best]').getAttribute('data-value'));
+  const previous=await lastId();
+  await opt.locator('[data-opt=apply]').click();
+  await waitForResult(page,previous);
+  await checkGuide('blue','rate-equations');
+  assert.ok(Math.abs(await meanBlue()/best-1)<.001);
+  assert.ok(await page.evaluate(()=>window.sequenceScaleTest.result.greenRates.every(r=>r===0)));
+  await chooseEngine('lightweight');
+  await page.getByRole('tab',{name:'通道时序'}).click();
+  const green=page.locator('[data-gate=greenEnabled]');
+  await green.check();
+  await checkGuide('two-color','rate-equations');
+  await page.getByRole('tab',{name:'通道时序'}).click();
+  await green.uncheck();
+  await checkGuide('blue','lightweight');
+  const noGreen=structuredClone(selected);
+  Object.assign(noGreen.config,{greenObliqueMW:0,greenHorizontalMW:0,finalObliqueUW:0,finalHorizontalUW:0});
+  await importExperiment(noGreen);
+  await checkGuide('blue','rate-equations');
+  const rampOnly=structuredClone(noGreen);
+  rampOnly.config.finalObliqueUW=30;
+  await importExperiment(rampOnly);
+  await checkGuide('two-color','rate-equations');
+  await page.getByRole('tab',{name:'通道时序'}).click();
+  const preset=page.locator('[data-action=preset]');
+  await preset.selectOption('blue-mot-399nm');
+  assert.equal(await select.inputValue(),'rate-equations');
+  await checkGuide('blue','rate-equations');
+  assert.ok((await select.locator('option').allTextContents()).some(label=>label.includes('四能级')));
+  await page.getByRole('tab',{name:'通道时序'}).click();
+  await preset.selectOption('ai-20261123-gpt62astra');
+  assert.equal(await select.inputValue(),'rate-equations');
+  assert.ok((await select.locator('option').allTextContents()).some(label=>label.includes('七能级')));
+  for(const format of ['yb-mot-sequence-v1','yb-mot-sequence-v2']) {
+    const legacy=structuredClone(reference);
+    legacy.format=format;
+    delete legacy.params.engine;
+    await importExperiment(legacy);
+    assert.equal(await select.inputValue(),'lightweight');
+    assert.equal(await page.evaluate(()=>window.sequenceScaleTest.result.engine),'lightweight');
+    await importExperiment(selected);
+    assert.equal(await select.inputValue(),'rate-equations');
+    assert.equal(await page.evaluate(()=>window.sequenceScaleTest.result.engine),'rate-equations');
+  }
+  return {lightRate,rate,score};
+}
+
 async function checkPage(useGPU) {
   const args=useGPU?gpuFlags:[...gpuFlags,'--disable-features=WebGPUService'];
   const browser=await chromium.launch({channel:'chrome',headless:true,chromiumSandbox:true,args});
@@ -274,7 +387,11 @@ async function checkPage(useGPU) {
     assert.equal(initial.backend,useGPU?'WebGPU':'CPU',initial.status);
     assert.equal(initial.n,useGPU?16384:1024);
     console.log(JSON.stringify({adapter,initial}));
-    if(!useGPU) return;
+    if(!useGPU) {
+      console.log(JSON.stringify({cpuEngines:await checkEngines(page)}));
+      assert.deepEqual(errors,[]);
+      return;
+    }
 
     const science=await page.evaluate(scientificChecks);
     console.log(JSON.stringify({science}));
@@ -306,11 +423,15 @@ async function checkPage(useGPU) {
     assert.equal((await summarized(page)).n,small);
     assert.ok(await page.evaluate(id=>window.sequenceScaleTest.terminated.includes(id) &&
       !window.sequenceScaleTest.completions.some(c=>c.id===id),interrupted));
+    console.log(JSON.stringify({engines:await checkEngines(page)}));
     await page.setViewportSize({width:390,height:840});
     await page.reload();
     await waitForResult(page);
     const compact=await summarized(page);
     assert.equal(compact.n,4096);
+    await page.getByRole('link',{name:'模拟引擎',exact:true}).click();
+    assert.ok(await page.locator('#sequence-engine [data-engine-select]').isVisible());
+    assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
     console.log(JSON.stringify({compact}));
     assert.deepEqual(errors,[]);
   } finally {await browser.close();}

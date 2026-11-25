@@ -7,6 +7,7 @@
   <title>Yb · 399 nm 蓝 MOT 工作台</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='15' fill='%23090c12'/%3E%3Cpath d='M9 32h46' stroke='%235ce1e6' stroke-width='3'/%3E%3Ccircle cx='32' cy='32' r='9' fill='%23ffb657'/%3E%3Cpath d='M16 18l8 8m24-8l-8 8M16 46l8-8m24 8l-8-8' stroke='%23c7f36b' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./engine-panel.css">
 </head>
 <body>
   <a class="skip-link" href="#workspace">跳到工作台</a>
@@ -20,6 +21,7 @@
     <nav class="mobile-jumps" aria-label="工作台区域"><a href="#scene-section">看云团</a><a href="#controls">调参数</a></nav>
     <div class="workspace-grid">
       <aside id="controls" class="controls" aria-label="MOT 参数">
+        <section class="control-section" id="mot-engine-panel" aria-label="模拟引擎"></section>
         <section class="control-section">
           <div class="section-heading"><h2><span class="section-number">01</span> 光场</h2><span class="mini-badge cyan">¹⁷⁴Yb · 399 nm</span></div>
           <div id="light-controls" class="control-stack"></div>
@@ -219,7 +221,7 @@ struct SimulationParameters {
   integration: vec4f,      // 时间步长、腰斑半径平方的倒数、重力加速度、反冲开关
   fieldSlopeAndRecoil: vec4f,
   biasAndDetuning: vec4f,
-  spectralScales: vec4f,   // 2k/Γ、2μB/(ℏΓ)、Γ/2
+  spectralScales: vec4f,   // 2k/Γ、2μB/(ℏΓ)、Γ/2、速率方程开关
   beamAxes: array<vec4f, 3>, // 每对光束正向的传播方向和 helicity
   peakS0123: vec4f,
   peakS45: vec4f,
@@ -255,6 +257,27 @@ struct Radiation {
 @group(0) @binding(2) var<storage, read_write> history: array<vec4f>;
 @group(0) @binding(3) var<uniform> chunk: Chunk;
 
+// 矩阵列对应 σ⁺、π、σ⁻，行对应 V1、V2、H 三个方向。
+fn resolvedLineRates(halfGamma: f32, positiveS: vec3f, negativeS: vec3f,
+                     forward: vec3f, backward: vec3f, zeeman: f32,
+                     wPlus: vec3f, wPi: vec3f, wMinus: vec3f) -> mat2x3f {
+  let fp = forward - zeeman;
+  let fm = forward + zeeman;
+  let bp = backward - zeeman;
+  let bm = backward + zeeman;
+  let positive = mat3x3f(positiveS * wPlus / (1.0 + fp * fp),
+                         positiveS * wPi / (1.0 + forward * forward),
+                         positiveS * wMinus / (1.0 + fm * fm));
+  let negative = mat3x3f(negativeS * wMinus / (1.0 + bp * bp),
+                         negativeS * wPi / (1.0 + backward * backward),
+                         negativeS * wPlus / (1.0 + bm * bm));
+  let pumping = 0.5 * (transpose(positive + negative) * vec3f(1.0));
+  let inverse = vec3f(1.0) / (1.0 + pumping);
+  let ground = 1.0 / (1.0 + dot(pumping, inverse));
+  return mat2x3f((halfGamma * ground) * (positive * inverse),
+                 (halfGamma * ground) * (negative * inverse));
+}
+
 // 向量的三个分量分别表示 V1、V2、H。反向光束共用同一腰斑分布。
 fn radiation(position: vec3f, velocity: vec3f, axes: mat3x3f, helicity: vec3f,
              positivePeaks: vec3f, negativePeaks: vec3f) -> Radiation {
@@ -271,6 +294,8 @@ fn radiation(position: vec3f, velocity: vec3f, axes: mat3x3f, helicity: vec3f,
   var cosine = vec3f(0.0);
   if (magnitude > 0.0) {
     cosine = clamp(projections * (field / magnitude), vec3f(-1.0), vec3f(1.0));
+  } else if (parameters.spectralScales.w != 0.0) {
+    cosine = projections * vec3f(0.0, 1.0, 0.0);
   }
   let spinProjection = helicity * cosine;
   let plusAmplitude = 0.5 * (vec3f(1.0) + spinProjection);
@@ -284,6 +309,12 @@ fn radiation(position: vec3f, velocity: vec3f, axes: mat3x3f, helicity: vec3f,
   let zeeman = vec3f(parameters.spectralScales.y * magnitude);
   let forward = detuning - doppler;
   let backward = detuning + doppler;
+  if (parameters.spectralScales.w != 0.0) {
+    let rates = resolvedLineRates(parameters.spectralScales.z, positiveS, negativeS,
+                                  forward, backward, zeeman.x, sigmaPlus, piWeight, sigmaMinus);
+    return Radiation(parameters.fieldSlopeAndRecoil.w * (axes * (rates[0] - rates[1])),
+                     rates[0] + rates[1]);
+  }
   let forwardPlus = forward - zeeman;
   let forwardMinus = forward + zeeman;
   let backwardPlus = backward - zeeman;

@@ -1,0 +1,11 @@
+flowchart TB
+    G["¹S₀ · m = 0"] -->|"399 nm"| B["¹P₁<br/>m = −1, 0, +1"]
+    G -->|"556 nm"| V["³P₁<br/>m = −1, 0, +1"]
+    B -->|"经 D 态级联"| DB["³P₀、³P₂ 暗态"]
+    V -->|"磁偶极跃迁"| DV["³P₀ 暗态"]
+    classDef blue fill:#152c42,stroke:#6cc7ff,color:#d2efff
+    classDef green fill:#192f24,stroke:#a3d68b,color:#dcf7d3
+    classDef dark fill:#2c231b,stroke:#ba8956,color:#ffcf96
+    class B blue
+    class V green
+    class DB,DV dark

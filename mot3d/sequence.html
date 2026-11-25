@@ -12,6 +12,7 @@
   <link rel="stylesheet" href="./sequence-imaging.css">
   <link rel="stylesheet" href="./vendor/dockview/dockview.css">
   <link rel="stylesheet" href="./sequence-dock.css">
+  <link rel="stylesheet" href="./engine-panel.css">
 </head>
 <body class="sequence-page">
   <a class="skip-link" href="#sequence-editor">跳到通道时序</a>
@@ -24,6 +25,7 @@
     <div class="layout-toolbar">
       <p class="layout-hint">拖动面板标签到边缘可分屏，拖到中央可合并。拖动分隔线可调整大小。</p>
       <div class="layout-actions">
+        <a class="small-button" href="#sequence-engine">模拟引擎</a>
         <a class="small-button" href="#sequence-optimizer">打开梯度优化</a>
         <details id="sequence-layout-menu"><summary class="button">面板布局</summary>
           <form class="layout-menu">
@@ -43,7 +45,8 @@
     </div>
     <div id="sequence-dock" role="region" aria-label="实验面板工作区"></div>
     <div id="sequence-panel-source" hidden>
-    <section id="sequence-editor" aria-label="通道时序"></section>
+      <section id="sequence-editor" aria-label="通道时序"></section>
+      <section id="sequence-engine" aria-label="模拟引擎"></section>
       <section id="sequence-optimizer" aria-label="梯度优化">
         <form id="seq-opt-form">
           <fieldset class="seq-opt-settings">
@@ -168,7 +171,7 @@
       <p class="sequence-note" id="sequence-geometry"></p>
     </details>
     <details class="sequence-method"><summary>光与原子能级的相互作用</summary>
-      <p id="sequence-light-force">模拟逐步计算每个 ¹⁷⁴Yb 原子受到的平均辐射压力。399 nm 蓝光驱动 ¹S₀ → ¹P₁，556 nm 绿光驱动 ¹S₀ → ³P₁。两条跃迁共享同一个基态。每个激发态都有 <i>m′</i> = −1、0、+1 三个磁子能级，分别与相对于局部磁场方向的 σ⁻、π、σ⁺ 偏振分量耦合。<a href="https://arxiv.org/html/2503.24383v2#S4" target="_blank" rel="noopener">Li 等，双色 MOT 的能级与布居 ↗</a></p>
+      <p id="sequence-light-force">模拟逐步计算每个 ¹⁷⁴Yb 原子受到的平均辐射压力。399 nm 蓝光驱动 ¹S₀ → ¹P₁，556 nm 绿光驱动 ¹S₀ → ³P₁。两条跃迁共享同一个基态。每个激发态都有 <i>m′</i> = −1、0、+1 三个磁子能级，分别与相对于局部磁场方向的 σ⁻、π、σ⁺ 偏振分量耦合。<a href="#sequence-engine">当前引擎的原理图与公式</a> · <a href="https://arxiv.org/html/2503.24383v2#S4" target="_blank" rel="noopener">Li 等，双色 MOT 的能级与布居 ↗</a></p>
       <p>每束光对每条跃迁分量的有效失谐为 Δ<sub>eff</sub> = Δ − <b>k</b>·<b>v</b> − <i>m′g′</i>μ<sub>B</sub>|<b>B</b>|/ℏ，各项均用角频率。运动产生多普勒频移，局部磁场使三个磁子能级发生不同的塞曼频移。结合原子所在位置的高斯光强、偏振权重和饱和效应，模型算出每束光的散射率，并按共享基态的布居修正两种颜色的散射率。</p>
       <p>第 <i>j</i> 束光的每次吸收向原子传递动量 ℏ<b>k</b><sub>j</sub>。各束贡献相加得到平均光力 <b>F</b> = ∑<sub>j</sub> ℏ<b>k</b><sub>j</sub><i>R</i><sub>j</sub>，其中 <i>R</i><sub>j</sub> 为该束光在当前时刻的散射率。相向光束的散射率之差决定原子受到的恢复力与速度阻尼。轨迹积分另计重力。启用随机反冲时，蓝光用动量扩散近似，绿光逐个抽样吸收和自发辐射事件。</p>
       <p>每次 399 nm 自发衰变经级联进入 ³P₀、³P₂ 的概率分别为 3.38 × 10⁻⁸ 和 2.02 × 10⁻⁹。每次 556 nm 自发衰变经磁偶极跃迁进入 ³P₀ 的概率估计为 5.54 × 10⁻⁹。模型根据每个原子的实际散射率抽取进入暗态的时刻。无再泵浦时，该原子随后退出亮态计数与荧光计算。<a href="./METHOD.md">分支比来源与计算方法</a></p>
@@ -196,7 +199,7 @@ struct Apparatus {
   peak: vec4f,            // 装载时蓝光（斜、水平）及绿光（斜、水平）
   detuning: vec4f,        // 蓝光、绿光装载、接收、压缩的归一化失谐 2Δ/Γ
   gradientsRamp: vec4f,   // 装载、接收、压缩末端的梯度及绿光功率波形
-  branches: vec4f,        // 蓝光到 ³P₀、³P₂ 及绿光到 ³P₀ 的每次衰变分支比
+  branches: vec4f,        // 蓝光到 ³P₀、³P₂、绿光到 ³P₀ 的分支比、速率方程开关
 }
 struct Atom {
   pos: vec3f, live: u32,
@@ -256,6 +259,27 @@ fn channels(stage: u32, fraction: f32) -> Channels {
   return c;
 }
 
+// 矩阵列对应 σ⁺、π、σ⁻，行对应 V1、V2、H 三个方向。
+fn resolvedLineRates(halfGamma: f32, positiveS: vec3f, negativeS: vec3f,
+                     forward: vec3f, backward: vec3f, zeeman: f32,
+                     wPlus: vec3f, wPi: vec3f, wMinus: vec3f) -> mat2x3f {
+  let fp = forward - zeeman;
+  let fm = forward + zeeman;
+  let bp = backward - zeeman;
+  let bm = backward + zeeman;
+  let positive = mat3x3f(positiveS * wPlus / (1.0 + fp * fp),
+                         positiveS * wPi / (1.0 + forward * forward),
+                         positiveS * wMinus / (1.0 + fm * fm));
+  let negative = mat3x3f(negativeS * wMinus / (1.0 + bp * bp),
+                         negativeS * wPi / (1.0 + backward * backward),
+                         negativeS * wPlus / (1.0 + bm * bm));
+  let pumping = 0.5 * (transpose(positive + negative) * vec3f(1.0));
+  let inverse = vec3f(1.0) / (1.0 + pumping);
+  let ground = 1.0 / (1.0 + dot(pumping, inverse));
+  return mat2x3f((halfGamma * ground) * (positive * inverse),
+                 (halfGamma * ground) * (negative * inverse));
+}
+
 fn lineRates(peaks: vec2f, inverseWaist2: f32, scales: vec4f, detuning: f32,
              r2: vec3f, alongVelocity: vec3f, b: f32,
              wPlus: vec3f, wPi: vec3f, wMinus: vec3f) -> LineRates {
@@ -266,6 +290,10 @@ fn lineRates(peaks: vec2f, inverseWaist2: f32, scales: vec4f, detuning: f32,
   let zeeman = scales.y * b;
   let f = detuning - doppler;
   let r = detuning + doppler;
+  if (lab.branches.w != 0.0) {
+    let rates = resolvedLineRates(scales.z, s, s, f, r, zeeman, wPlus, wPi, wMinus);
+    return LineRates(rates[0], rates[1]);
+  }
   let fp = f - zeeman; let fm = f + zeeman;
   let rp = r - zeeman; let rm = r + zeeman;
   let positive = wPlus/(sat+fp*fp) + wPi/(sat+f*f) + wMinus/(sat+fm*fm);
@@ -281,7 +309,11 @@ fn radiation(pos: vec3f, vel: vec3f, c: Channels, axes: mat3x3f, helicity: vec3f
   let field = c.gradient * lab.tensorGravity.xyz * pos + lab.biasRecoil.xyz;
   let b = length(field);
   var cosine = vec3f(0.0);
-  if (b > 0.0) { cosine = clamp(projections * (field/b),vec3f(-1.0),vec3f(1.0)); }
+  if (b > 0.0) {
+    cosine = clamp(projections * (field/b),vec3f(-1.0),vec3f(1.0));
+  } else if (lab.branches.w != 0.0) {
+    cosine = projections * vec3f(0.0,1.0,0.0);
+  }
   let hc = helicity * cosine;
   let wp = 0.25*(1.0+hc)*(1.0+hc);
   let wm = 0.25*(1.0-hc)*(1.0-hc);

@@ -4,11 +4,12 @@ import { GREEN_TRANSITION, simulateSequence } from '../sequence-physics.js';
 import { blueSequence, songSequence } from '../sequence.js';
 
 // 零场、零速度时，六束等功率共振光给出恒定散射率，暗态跃迁时刻可直接计算。
-function resonantRate(powerMW, line, waistM) {
+function resonantRate(powerMW, line, waistM, engine) {
   const wavelength = 2*Math.PI/line.k;
   const saturationIntensity = Math.PI*C.h*C.c*line.gamma/(3*wavelength**3);
   const saturation = 6*2*powerMW*.001/(Math.PI*waistM**2*saturationIntensity);
-  return line.gamma*.5*saturation/(1+saturation);
+  const factor = engine === 'rate-equations' ? 2/3 : 1;
+  return line.gamma*.5*saturation/(1+factor*saturation);
 }
 
 function targetedSample(rates, expectedChannel) {
@@ -24,15 +25,17 @@ function targetedSample(rates, expectedChannel) {
   throw new Error('给定的物理分支在种子搜索范围内没有产生窗内事件。');
 }
 
-async function checkBoundaryEvent(gpu) {
+async function checkBoundaryEvent(gpu, engine) {
   // 水平对射共振光在此速度下给出相等的两束散射率，原子沿光轴匀速运动。
   const v=1, powerMW=10, waist=.006, seed=238330;
   const saturationIntensity = Math.PI*C.h*C.c*C.gamma/(3*C.wavelength**3);
   const saturation = 4*powerMW*.001/(Math.PI*waist**2*saturationIntensity);
   const detuning = 2*BLUE_TRANSITION.k*v/C.gamma;
-  const rate = C.gamma*.5*saturation/(1+saturation+detuning**2);
+  // 两束水平光各驱动一个圆偏振分量，各有 Wq/Γ = s/[4(1+δ²)]。
+  const factor = engine === 'rate-equations' ? .75 : 1;
+  const rate = C.gamma*.5*saturation/(1+factor*saturation+detuning**2);
   const opticalTime = branchDraws(seed,0).threshold/(rate*(DARK_BRANCHES.blueP0+DARK_BRANCHES.blueP2));
-  const input = {n:1,seed,dtUS:5,recoil:false,gravity:false,waistMM:6};
+  const input = {n:1,seed,engine,dtUS:5,recoil:false,gravity:false,waistMM:6};
   const config = {...blueSequence(),loadMS:.1,holdMS:.01,blueHorizontalMW:powerMW,
     blueObliqueMW:0,blueDetuningMHz:0,loadGradient:0};
   for (const distanceM of [1e-6,4e-6]) {
@@ -49,8 +52,8 @@ async function checkBoundaryEvent(gpu) {
   }
 }
 
-export async function checkSequenceBranching(gpu) {
-  await checkBoundaryEvent(gpu);
+export async function checkSequenceBranching(gpu, engine = 'lightweight') {
+  await checkBoundaryEvent(gpu,engine);
   const cases = [
     {blueMW:10,greenMW:0,channel:'blueP0'},
     {blueMW:10,greenMW:0,channel:'blueP2'},
@@ -64,13 +67,13 @@ export async function checkSequenceBranching(gpu) {
       {...blueSequence(),loadMS:5,holdMS:1};
     Object.assign(config,{blueDetuningMHz:0,shieldingMHz:0,loadGradient:0,
       blueObliqueMW:blueMW,blueHorizontalMW:blueMW,greenObliqueMW:greenMW,greenHorizontalMW:greenMW});
-    const blue = resonantRate(blueMW,BLUE_TRANSITION,.006), green = resonantRate(greenMW,GREEN_TRANSITION,.006);
+    const blue = resonantRate(blueMW,BLUE_TRANSITION,.006,engine), green = resonantRate(greenMW,GREEN_TRANSITION,.006,engine);
     const fb = blue/BLUE_TRANSITION.gamma, fg = green/GREEN_TRANSITION.gamma;
     const rb = blue*(1-fg)/(1-fb*fg), rg = green*(1-fb)/(1-fb*fg);
     const rates = {blueP0:rb*DARK_BRANCHES.blueP0,blueP2:rb*DARK_BRANCHES.blueP2,greenP0:rg*DARK_BRANCHES.greenP0};
     const totalRate = rates.blueP0+rates.blueP2+rates.greenP0;
     const {seed,timeMS} = targetedSample(rates,channel);
-    const input = {n:1,seed,dtUS:5,recoil:false,gravity:false,waistMM:6,greenWaistMM:6};
+    const input = {n:1,seed,engine,dtUS:5,recoil:false,gravity:false,waistMM:6,greenWaistMM:6};
     const options = {initialStates:new Float64Array(6)};
     const reference = simulateSequence(input,config,options);
     const result = await gpu.run(input,config,options);

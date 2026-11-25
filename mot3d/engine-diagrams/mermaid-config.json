@@ -1,0 +1,23 @@
+{
+  "theme": "base",
+  "fontFamily": "Inter, PingFang SC, Microsoft YaHei, system-ui, sans-serif",
+  "themeVariables": {
+    "background": "#09121c",
+    "primaryColor": "#172838",
+    "primaryTextColor": "#eaf3fb",
+    "primaryBorderColor": "#859aad",
+    "textColor": "#eaf3fb",
+    "lineColor": "#a5b6c8",
+    "edgeLabelBackground": "#09121c",
+    "fontSize": "18px"
+  },
+  "flowchart": {
+    "htmlLabels": false,
+    "curve": "linear",
+    "diagramPadding": 4,
+    "nodeSpacing": 14,
+    "rankSpacing": 22,
+    "padding": 8
+  },
+  "deterministicIds": true
+}

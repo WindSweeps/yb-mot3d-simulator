@@ -176,7 +176,7 @@ export function prepareSequenceRun(input, config, options = {}) {
   }
   if (initial.length !== n*6 || initial.some(x => !Number.isFinite(x))) throw new RangeError('时序初始相空间尺寸或数值无效。');
   const result = {
-    n, frameCount:grid.length, stages:program.stages, loadWindowMS:loadEnd,
+    n, engine:model.params.engine, frameCount:grid.length, stages:program.stages, loadWindowMS:loadEnd,
     timesMS:Float64Array.from(grid, point => point.time),
     metrics:[], summary:{N0:0, N1:0, N2:0},
   };

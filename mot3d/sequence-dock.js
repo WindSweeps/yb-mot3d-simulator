@@ -7,6 +7,7 @@ const panels = [
   ['readings', '原子样本', 'sequence-readings'],
   ['curves', '原子数与 PSD', 'sequence-curves'],
   ['optimizer', '梯度优化', 'sequence-optimizer'],
+  ['engine', '模拟引擎', 'sequence-engine'],
 ];
 const compactScreen = matchMedia('(max-width: 800px)');
 const storagePrefix = 'yb-mot3d-sequence-layout-v1-';
@@ -91,6 +92,7 @@ export function mountSequenceDock() {
     const readings = add('readings', imaging, 'within', true);
     add('curves', readings, 'within', true);
     add('optimizer', timeline, 'within', true);
+    add('engine', timeline, 'within', true);
     if (!compact) {
       timeline.api.setSize({width: Math.round(host.clientWidth * .46)});
       scene.api.setSize({height: Math.round(host.clientHeight * .52)});
@@ -115,13 +117,14 @@ export function mountSequenceDock() {
     dock.layout(host.clientWidth, host.clientHeight);
     try {
       const saved = JSON.parse(localStorage.getItem(storagePrefix + profile));
-      // 已保存的布局依面板加入顺序包含四至六个面板。
+      // 面板按加入顺序登记，载入旧布局时保留用户的分组与尺寸。
       const count = Object.keys(saved?.panels ?? {}).length;
       if (count >= 4 && count <= panels.length && validLayout(saved, panels.slice(0, count))) {
         dock.fromJSON(saved);
         if (count < panels.length) {
           if (!dock.getPanel('curves')) add('curves', dock.getPanel('readings'), 'within', true);
-          add('optimizer', dock.getPanel('timeline'), 'within', true);
+          if (!dock.getPanel('optimizer')) add('optimizer', dock.getPanel('timeline'), 'within', true);
+          add('engine', dock.getPanel('timeline'), 'within', true);
           writeLayout(dock.toJSON());
         }
         restored = true;

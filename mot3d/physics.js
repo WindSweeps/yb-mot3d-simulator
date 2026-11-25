@@ -1,4 +1,5 @@
 import { BLUE_DECAY_RATE, DARK_BRANCHES, EMISSION_BRANCHES, branchDraws } from './branching.js';
+import { defaultEngine, validateEngine } from './engines.js';
 
 /** 174Yb J=0 -> J'=1, six travelling waves; SI internally. See METHOD.md. */
 export const CONSTANTS = Object.freeze({
@@ -27,6 +28,7 @@ export const BEAM_LABELS = Object.freeze(['+V1', '−V1', '+V2', '−V2', '+H', 
 // Fixed optics: a current or quadrupole-axis change does not change polarization.
 export const HELICITIES = Object.freeze([-1, -1, -1, -1, 1, 1]);
 export const DEFAULTS = Object.freeze({
+  engine: defaultEngine,
   detuningMHz: -25, powersMW: Object.freeze([15, 15, 15, 15, 15, 15]), waistMM: 6,
   mainCurrentA: 3, gradientPerAmp: 10, mainAxis: 'y',
   biasCurrentA: Object.freeze([0, 0, 0]), biasPerAmp: Object.freeze([1, 1, 1]),
@@ -38,6 +40,7 @@ export const DEFAULTS = Object.freeze({
 
 function normalize(input = {}) {
   const p = { ...DEFAULTS, ...input };
+  validateEngine(p.engine);
   for (const [key, len] of [['powersMW', 6], ['biasCurrentA', 3], ['biasPerAmp', 3]]) {
     if (!Array.isArray(p[key]) || p[key].length !== len || p[key].some(v => !Number.isFinite(v)))
       throw new TypeError(`${key} requires ${len} finite numbers`);
@@ -82,6 +85,7 @@ export function compile(input = {}) {
   if (input?._mot3dCompiled === true) return input;
   const params = normalize(input), d = derive(params);
   return { _mot3dCompiled: true, params, derived: d,
+    sublevelRates: params.engine === 'rate-equations' ? new Float64Array(18) : null,
     fieldSlope: d.mainTensor.map(v => v * d.gradientTeslaPerM), bias: d.biasTesla,
     peakS: d.peakS, inverseWaistSquared: 1 / (params.waistMM * 1e-3) ** 2,
     detuning: 2 * Math.PI * params.detuningMHz * 1e6,
@@ -109,17 +113,28 @@ export function evaluate(x, y, z, vx, vy, vz, c, out, s, transition = BLUE_TRANS
     spectrum.fieldTesla = b;
     spectrum.zeeman = zeeman;
   }
-  let ax = 0, ay = 0, az = 0;
+  const sublevelRates = c.sublevelRates;
+  let minusSum = 0, piSum = 0, plusSum = 0;
   for (let j = 0; j < 6; j++) {
     const d = BEAM_DIRECTIONS[j];
-    const cosine = b > 0 ? Math.max(-1, Math.min(1, (d[0]*bx+d[1]*by+d[2]*bz) / b)) : 0;
+    const cosine = b > 0 ? Math.max(-1, Math.min(1, (d[0]*bx+d[1]*by+d[2]*bz) / b)) : (sublevelRates ? d[1] : 0);
     const hc = HELICITIES[j] * cosine;
     const doppler = k*(d[0]*vx+d[1]*vy+d[2]*vz);
     const dp = 2 * (c.detuning - doppler - zeeman) / gamma;
     const dz = dp + 2 * zeeman / gamma, dm = dz + 2 * zeeman / gamma;
     const plus = .25*(1+hc)**2, pi = .5*(1-cosine*cosine), minus = .25*(1-hc)**2;
-    const rate = .5 * gamma * s[j] * (
-      plus / (saturation+dp*dp) + pi / (saturation+dz*dz) + minus / (saturation+dm*dm));
+    if (sublevelRates) {
+      const offset = 3*j, halfS = .5*s[j];
+      sublevelRates[offset] = halfS * minus / (1 + dm*dm);
+      sublevelRates[offset+1] = halfS * pi / (1 + dz*dz);
+      sublevelRates[offset+2] = halfS * plus / (1 + dp*dp);
+      minusSum += sublevelRates[offset];
+      piSum += sublevelRates[offset+1];
+      plusSum += sublevelRates[offset+2];
+    } else {
+      out[3+j] = .5 * gamma * s[j] * (
+        plus / (saturation+dp*dp) + pi / (saturation+dz*dz) + minus / (saturation+dm*dm));
+    }
     if (spectrum) {
       spectrum.doppler[j] = doppler;
       const offset = 3*j;
@@ -130,7 +145,20 @@ export function evaluate(x, y, z, vx, vy, vz, c, out, s, transition = BLUE_TRANS
       spectrum.polarization[offset+1] = pi;
       spectrum.polarization[offset+2] = plus;
     }
-    out[3+j] = rate;
+  }
+  if (sublevelRates) {
+    // 对每个磁子能级求解吸收、受激发射与自发衰变的局部稳态平衡。
+    const minusFactor = 1/(1+minusSum), piFactor = 1/(1+piSum), plusFactor = 1/(1+plusSum);
+    const decayFromGround = gamma/(1 + minusSum*minusFactor + piSum*piFactor + plusSum*plusFactor);
+    for (let j = 0; j < 6; j++) {
+      const offset = 3*j;
+      out[3+j] = decayFromGround * (sublevelRates[offset]*minusFactor +
+        sublevelRates[offset+1]*piFactor + sublevelRates[offset+2]*plusFactor);
+    }
+  }
+  let ax = 0, ay = 0, az = 0;
+  for (let j = 0; j < 6; j++) {
+    const rate = out[3+j], d = BEAM_DIRECTIONS[j];
     ax += recoil * rate * d[0]; ay += recoil * rate * d[1]; az += recoil * rate * d[2];
   }
   out[0] = ax; out[1] = ay; out[2] = az;
@@ -297,7 +325,7 @@ export function finishSimulation(c, initial, output, started) {
     });
     return {n:count,meanMS:count?mean:null,stdMS:count?Math.sqrt(Math.max(0,m2/count)):null};
   };
-  return { params:p, ...output,
+  return { params:p, engine:p.engine, ...output,
     initialLongitudinalVelocities,
     summary:{ retained:count,retainedFraction:count/n,centroidMM:count?centroid:null,
       rmsMM:count?moments.map(v=>Math.sqrt(Math.max(0,v/count))):null,

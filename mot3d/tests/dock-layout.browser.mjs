@@ -19,7 +19,7 @@ await page.addInitScript(()=>{
   window.dockTestErrors=[];
   window.addEventListener('error',event=>window.dockTestErrors.push(event.message));
 });
-const labels = { timeline:'通道时序', scene:'三维 MOT', imaging:'相机成像', readings:'原子样本', curves:'原子数与 PSD', optimizer:'梯度优化' };
+const labels = { timeline:'通道时序', scene:'三维 MOT', imaging:'相机成像', readings:'原子样本', curves:'原子数与 PSD', optimizer:'梯度优化', engine:'模拟引擎' };
 const entries = new Map(Object.entries(labels).map(([id,text])=>[text,id]));
 const keyPrefix = 'yb-mot3d-sequence-layout-v1-';
 const find = selector => page.locator(selector);
@@ -186,7 +186,7 @@ try {
   assert.ok(groupOf(standard,'scene').x>groupOf(standard,'timeline').x);
   assert.ok(groupOf(standard,'imaging').y>groupOf(standard,'scene').y);
   assert.deepEqual(groupOf(standard,'imaging').tabs,['imaging','readings','curves']);
-  assert.deepEqual(groupOf(standard,'timeline').tabs,['timeline','optimizer']);
+  assert.deepEqual(groupOf(standard,'timeline').tabs,['timeline','optimizer','engine']);
   assert.equal(groupOf(standard,'imaging').active,'imaging');
   await checkTimelineDrag();
   await resizeSeparator('horizontal',-210,-90);
@@ -259,6 +259,30 @@ try {
   await deep.setViewportSize({width:320,height:820});
   assert.equal(await deep.evaluate(()=>document.documentElement.scrollWidth),320);
   await deep.close();
+  // 上一版保存的六面板布局仍应保留用户拖出的分栏与各列宽度。
+  const sixPanels=JSON.parse(persisted);
+  delete sixPanels.panels.engine;
+  function removeEngineTab(node) {
+    if (node.type==='leaf') node.data.views=node.data.views.filter(id=>id!=='engine');
+    else node.data.forEach(removeEngineTab);
+  }
+  removeEngineTab(sixPanels.grid.root);
+  const migration=await browser.newContext({viewport:{width:1440,height:960}});
+  await migration.addInitScript(({key,layout})=>localStorage.setItem(key,JSON.stringify(layout)),
+    {key:key('wide'),layout:sixPanels});
+  const previous=await migration.newPage();
+  await previous.goto(url);
+  await previous.getByRole('tab',{name:labels.engine}).waitFor();
+  for(const group of saved) {
+    const tab=previous.getByRole('tab',{name:labels[group.tabs[0]],exact:true});
+    const migrated=await tab.evaluate(el=>{
+      const group=el.closest('.dv-groupview');
+      return {width:group.clientWidth,tabs:[...group.querySelectorAll('.layout-tab')].map(t=>t.dataset.panel)};
+    });
+    assert.deepEqual(migrated.tabs,group.tabs);
+    assert.ok(Math.abs(migrated.width-group.w)<3);
+  }
+  await migration.close();
   assert.deepEqual(errors,[]);
   console.log(JSON.stringify({url,standard,afterDrop:fingerprint(stacked),split:fingerprint(split),resizedPixels:delta,
     restoredWidths:restored.map(g=>g.w),compact:compact[0].tabs,workerCountBeforeReload:firstCount,retained}));
