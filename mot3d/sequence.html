@@ -90,6 +90,12 @@
           <span>阱内原子数 <output id="seq-curve-atoms">—</output></span>
           <span>峰值 PSD <output id="seq-curve-psd">—</output></span>
         </div>
+        <div class="seq-curve-constants">
+          <div><label for="seq-curve-tau-loading">装载时间常数 τ</label> <output id="seq-curve-tau-loading" aria-describedby="seq-tau-loading-definition">暂无模拟数据</output>
+            <p id="seq-tau-loading-definition">从开始装载到原子数达到模型稳态值的 63.2%。</p></div>
+          <div><label for="seq-curve-tau-loss">损失时间常数 τ</label> <output id="seq-curve-tau-loss" aria-describedby="seq-tau-loss-definition">暂无模拟数据</output>
+            <p id="seq-tau-loss-definition">从关闭入射原子束到阱内原子数首次降至关源时的 1/e（36.8%）。</p></div>
+        </div>
         <svg id="seq-curve-plot" role="slider" tabindex="0" aria-label="曲线上的时序游标" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0">
           <g class="seq-curve-axes"></g>
           <path class="seq-atoms-trace"></path><path class="seq-psd-trace"></path>

@@ -24,6 +24,8 @@ export function mountSequenceCurves(section, onSeek) {
   const timeOutput = section.querySelector('#seq-curve-time');
   const atomOutput = section.querySelector('#seq-curve-atoms');
   const psdOutput = section.querySelector('#seq-curve-psd');
+  const loadingTime = section.querySelector('#seq-curve-tau-loading');
+  const lossTime = section.querySelector('#seq-curve-tau-loss');
   let points = [], stages = [], start = 0, end = 0, time = 0, width = 0;
 
   function xAt(t) {
@@ -136,13 +138,15 @@ export function mountSequenceCurves(section, onSeek) {
   observer.observe(plot);
 
   return {
-    setSeries(series, sequenceStages) {
+    setSeries(series, sequenceStages, timeConstants) {
       if (stages !== sequenceStages) {
         const previous = select.value;
         select.replaceChildren(new Option('完整时序', 'all'), ...sequenceStages.map(s => new Option(s.label,s.id)));
         select.value = sequenceStages.some(s => s.id === previous) ? previous : 'all';
       }
       points = series; stages = sequenceStages;
+      setTimeConstant(loadingTime, timeConstants?.loading, '无原子装载');
+      setTimeConstant(lossTime, timeConstants?.loss, '关源时阱内无原子');
       render();
     },
     setCursor(t, atoms, psd) {
@@ -160,4 +164,20 @@ export function mountSequenceCurves(section, onSeek) {
     },
     destroy() { observer.disconnect(); },
   };
+}
+
+function setTimeConstant(output, reading, emptyText) {
+  const status = reading?.status ?? 'unavailable';
+  output.dataset.status = status;
+  if (status === 'reached' || status === 'lower-bound') {
+    const {timeMS} = reading;
+    const lowerBound = status === 'lower-bound';
+    const value = lowerBound ? timeMS : Number(timeMS.toPrecision(5));
+    output.dataset.value = String(timeMS);
+    output.textContent = (lowerBound ? '> ' : '') + value + ' ms';
+    return;
+  }
+  delete output.dataset.value;
+  const messages = {unavailable:'暂无模拟数据', empty:emptyText, 'no-steady-state':'无有限稳态', 'out-of-range':'超出数值范围'};
+  output.textContent = messages[status];
 }

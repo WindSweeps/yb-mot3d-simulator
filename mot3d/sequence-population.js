@@ -30,6 +30,14 @@ function rateTimesMS(rate, timeMS) {
   return rate >= timeMS ? (rate / 1000) * timeMS : rate * (timeMS / 1000);
 }
 
+function loadingRates(rate, alpha, beta) {
+  // λ = √(α² + 4βR)。用共同的速率单位计算，避免平方溢出。
+  const pairRate = Math.sqrt(beta) * Math.sqrt(rate);
+  const scale = Math.max(alpha, pairRate);
+  const a = alpha / scale;
+  return {scale, a, lambda:Math.hypot(a, 2 * (pairRate / scale))};
+}
+
 // dN/dt = R − αN − βN²，N(0)=0。返回连续模型的原子数期望值。
 export function loadPopulation(timeMS, flux, captureProbability, alpha, beta) {
   for (const [name, value] of Object.entries({ timeMS, flux, captureProbability, alpha, beta })) {
@@ -40,11 +48,7 @@ export function loadPopulation(timeMS, flux, captureProbability, alpha, beta) {
   if (rate === 0 || timeMS === 0) return 0;
   if (alpha === 0 && beta === 0) return rateTimesMS(rate, timeMS);
 
-  // λ = √(α² + 4βR)。两项同时缩放，避免中间步骤出现平方溢出。
-  const pairRate = Math.sqrt(beta) * Math.sqrt(rate);
-  const scale = Math.max(alpha, pairRate);
-  const a = alpha / scale;
-  const lambda = Math.hypot(a, 2 * (pairRate / scale));
+  const {scale, a, lambda} = loadingRates(rate, alpha, beta);
   const x = rateTimesMS(scale, timeMS) * lambda;
   const growth = -Math.expm1(-x);
   const denominator = lambda + a + (lambda - a) * Math.exp(-x);
@@ -67,6 +71,40 @@ export function holdWeight(weight, count, timeMS, alpha, beta) {
   const x = alpha * seconds;
   const integral = x === 0 ? seconds : -Math.expm1(-x) / alpha;
   return (weight * Math.exp(-x)) / (1 + beta * count * integral * weight);
+}
+
+function loadingTimeConstant(rate, alpha, beta) {
+  if (rate === 0) return {status:'empty', timeMS:null};
+  if (alpha === 0 && beta === 0) return {status:'no-steady-state', timeMS:null};
+  const {scale, a, lambda} = loadingRates(rate, alpha, beta);
+  // 装载解满足 N/N∞=(1−exp(−λt))/(1+q exp(−λt))，取 N/N∞=1−1/e。
+  const q = (lambda - a) / (lambda + a);
+  const timeMS = (1000 / lambda) * (1 + Math.log1p(-Math.expm1(-1) * q)) / scale;
+  return Number.isFinite(timeMS) ? {status:'reached', timeMS} : {status:'out-of-range', timeMS:null};
+}
+
+function lossTimeConstant(intervals, endMS, finalWeight, finalCount, loaded) {
+  if (loaded === 0) return {status:'empty', timeMS:null};
+  const target = loaded / Math.E, shutoff = intervals[0].start;
+  // 解析权重逐帧递推。判定帧沿恰好达到阈值时，计入已经累积的浮点舍入误差。
+  const reachesAtFrame = (atoms, index) => atoms <= target * (1 + 4 * (index+1) * Number.EPSILON);
+  for (let i = 0; i < intervals.length; i++) {
+    const {start, count, weight, alpha, beta} = intervals[i], next = intervals[i+1];
+    const elapsed = start - shutoff;
+    if (reachesAtFrame(weight * count, i)) return {status:'reached', timeMS:elapsed};
+    // 帧内计数固定，N 单调衰减。帧沿使用新计数，因此跳变发生在观察帧时刻。
+    if ((next?.weight ?? finalWeight) * count < target) {
+      let lo = 0, hi = (next?.start ?? endMS) - start;
+      while (true) {
+        const mid = lo + (hi - lo) / 2;
+        if (mid === lo || mid === hi) break;
+        if (holdWeight(weight, count, mid, alpha, beta) * count <= target) hi = mid;
+        else lo = mid;
+      }
+      return {status:'reached', timeMS:elapsed + hi};
+    }
+  }
+  return {status:reachesAtFrame(finalWeight * finalCount, intervals.length) ? 'reached' : 'lower-bound', timeMS:endMS - shutoff};
 }
 
 export function sequencePopulation(program, result, settings) {
@@ -115,5 +153,12 @@ export function sequencePopulation(program, result, settings) {
     if (timeMS < load.endMS) return loadPopulation(timeMS, flux, p, load.alpha, load.beta);
     return weightAt(timeMS, trapped) * trapped;
   }
-  return {at, weightAt, loaded, estimatedAtoms: {N0:loaded, N1:at(program.checkpointTimesMS[1], N1), N2:finalWeight * N2}};
+  function timeConstants() {
+    return {
+      loading:loadingTimeConstant(flux * p, load.alpha, load.beta),
+      loss:lossTimeConstant(intervals, program.durationMS, finalWeight, metrics.at(-1).count, loaded),
+    };
+  }
+  return {at, weightAt, loaded, timeConstants,
+    estimatedAtoms: {N0:loaded, N1:at(program.checkpointTimesMS[1], N1), N2:finalWeight * N2}};
 }

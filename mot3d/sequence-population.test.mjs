@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { loadPopulation, sequenceLossStages, sequencePopulation } from './sequence-population.js';
-import { compileSequence, songSequence } from './sequence.js';
+import { blueSequence, compileSequence, songSequence } from './sequence.js';
 import { simulateSequence } from './sequence-physics.js';
 
 function near(actual, expected, tolerance = 2e-13) {
@@ -98,5 +98,43 @@ assert.deepEqual(sequencePopulation(program, empty, {flux:1e9}).estimatedAtoms, 
 for (const [index, value] of [[0, -1], [1, Infinity], [2, -1], [2, 1.1], [3, NaN], [4, -.1]]) {
   const args = [100, flux, p, alpha, beta]; args[index] = value;
   assert.throws(() => loadPopulation(...args), RangeError);
+}
+
+const inactive = {status:'empty', timeMS:null};
+assert.deepEqual(sequencePopulation(program, empty, {flux}).timeConstants(), {loading:inactive, loss:inactive});
+assert.deepEqual(sequencePopulation(program, held, {flux:0}).timeConstants(), {loading:inactive, loss:inactive});
+const constants = overrides => sequencePopulation(program, held, {...lossless,...overrides}).timeConstants();
+assert.deepEqual(constants({}), {loading:{status:'no-steady-state', timeMS:null}, loss:{status:'lower-bound', timeMS:111}});
+assert.deepEqual(constants({alpha:1e-310}).loading, {status:'out-of-range', timeMS:null});
+near(constants({alpha}).loading.timeMS, 1000/alpha);
+near(constants({beta}).loading.timeMS, 1000 * Math.atanh(1 - 1/Math.E) / Math.sqrt(flux*beta));
+const mixedLoading = constants({alpha, beta}).loading;
+assert.equal(mixedLoading.status, 'reached');
+const steady = 2*flux / (alpha + Math.sqrt(alpha**2 + 4*beta*flux));
+near(loadPopulation(mixedLoading.timeMS, flux, 1, alpha, beta), steady*(1 - 1/Math.E));
+
+// 10 ms 接收和前段压缩共同提供积分损失，阈值位于两个回放帧之间。
+const switched = constants({greenAlpha:10, compressAlpha:27}).loss;
+assert.equal(switched.status, 'reached');
+near(switched.timeMS, 11 + 900/27);
+const betaHold = 1e-8, n0 = flux*5;
+const pairOnly = constants({handoffBeta:betaHold, greenBeta:betaHold, compressBeta:betaHold}).loss;
+assert.equal(pairOnly.status, 'reached');
+near(pairOnly.timeMS, 1000 * Math.expm1(1) / (betaHold * n0));
+const aHold = 9;
+const mixedLoss = constants({handoffAlpha:aHold, handoffBeta:betaHold, greenAlpha:aHold, greenBeta:betaHold,
+  compressAlpha:aHold, compressBeta:betaHold}).loss;
+assert.equal(mixedLoss.status, 'reached');
+near(mixedLoss.timeMS, 1000/aHold * Math.log((Math.E*aHold + betaHold*n0) / (aHold + betaHold*n0)));
+assert.equal(constants({compressAlpha:10}).loss.status, 'reached');
+near(constants({compressAlpha:10}).loss.timeMS, 111);
+
+// 无光、无重力时两条等速轨迹越过 3 mm 边界，数量从三条变为一条，首次低于 N₀/e。
+const driftConfig = {...blueSequence(), loadMS:.1, holdMS:100, blueEnabled:false};
+for (const [speed, dropMS] of [[.05,60],[.03002,100]]) {
+  const drift = simulateSequence({...params,n:3}, driftConfig,
+    {initialStates:[0,0,0,0,0,0, 0,0,0,speed,0,0, 0,0,0,speed,0,0]});
+  const pop = sequencePopulation(compileSequence(driftConfig), drift, {...lossless,holdAlpha:0,holdBeta:0});
+  assert.deepEqual(pop.timeConstants().loss, {status:'reached', timeMS:dropMS});
 }
 console.log('已验证宋博组表 II 系数、式 (2) 与 (3)、真实轨迹的阱内计数及双体衰减。');

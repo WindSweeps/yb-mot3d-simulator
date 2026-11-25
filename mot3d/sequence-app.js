@@ -130,7 +130,7 @@ function refreshCurves() {
       }
     }
   }
-  curves.setSeries(points, program.stages);
+  curves.setSeries(points, program.stages, population?.timeConstants());
 }
 
 function summarize() {
@@ -345,6 +345,7 @@ $('#sequence-export').addEventListener('click', () => {
   if (result) file.samplingDiagnostics = result.samplingDiagnostics;
   if (population) {
     file.estimatedAtoms = population.estimatedAtoms;
+    file.timeConstants = population.timeConstants();
   }
   const url = URL.createObjectURL(new Blob([JSON.stringify(file, null, 2)], {type:'application/json'}));
   const a = document.createElement('a'); a.href = url;

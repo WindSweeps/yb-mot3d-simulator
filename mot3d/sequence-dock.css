@@ -90,7 +90,11 @@
 .seq-curve-tools label { color:var(--muted); }
 .seq-curve-tools select { font:inherit; }
 .seq-curve-readouts { margin:8px 0; justify-content:flex-start; color:var(--muted); }
-.seq-curve-readouts output,#seq-curve-time { font-family:var(--mono); font-variant-numeric:tabular-nums; }
+.seq-curve-constants { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,230px),1fr)); gap:6px 14px; padding:8px 0; border-top:1px solid var(--line); }
+.seq-curve-constants label,.seq-curve-constants p { color:var(--muted); }
+.seq-curve-constants p { margin:2px 0 0; }
+.seq-curve-constants output { display:inline-block; }
+.seq-curve-readouts output,.seq-curve-constants output,#seq-curve-time { font-family:var(--mono); font-variant-numeric:tabular-nums; }
 #seq-curve-atoms { color:var(--lime); }
 #seq-curve-psd { color:var(--cyan); }
 #seq-curve-plot { display:block; width:100%; height:254px; outline-offset:2px; user-select:none; }
