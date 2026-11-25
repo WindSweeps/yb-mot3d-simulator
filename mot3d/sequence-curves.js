@@ -137,6 +137,11 @@ export function mountSequenceCurves(section, onSeek) {
 
   return {
     setSeries(series, sequenceStages) {
+      if (stages !== sequenceStages) {
+        const previous = select.value;
+        select.replaceChildren(new Option('完整时序', 'all'), ...sequenceStages.map(s => new Option(s.label,s.id)));
+        select.value = sequenceStages.some(s => s.id === previous) ? previous : 'all';
+      }
       points = series; stages = sequenceStages;
       render();
     },

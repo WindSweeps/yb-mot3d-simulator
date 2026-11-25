@@ -13,16 +13,18 @@ function packApparatus({model,field,program}) {
   const c = program.config, {blue,green} = field;
   const line = ({transition: t}) => [2*t.k/t.gamma, 2*t.lande*CONSTANTS.muB/(CONSTANTS.hbar*t.gamma),
     t.gamma/2, t.recoil];
-  const b = c.blueEnabled ? blue.factor : 0, g = c.greenEnabled ? green.factor : 0;
+  const load = sequenceAt(program, 0);
+  const receive = sequenceAt(program, program.stages.find(s => s.id === 'green')?.startMS ?? program.durationMS);
+  const final = sequenceAt(program, program.durationMS);
   return new Float32Array([
     ...line(blue), ...line(green), ...model.derived.mainTensor.map(x => x*.01), model.gravityZ,
     ...model.bias, Number(model.params.recoil),
     ...[0,2,4].flatMap(i => [...BEAM_DIRECTIONS[i],HELICITIES[i]]),
-    blue.inverseWaistSquared, green.inverseWaistSquared, g*c.finalObliqueUW/1000, g*c.finalHorizontalUW/1000,
-    b*c.blueObliqueMW, b*c.blueHorizontalMW, g*c.greenObliqueMW, g*c.greenHorizontalMW,
-    normalizedMHzFactor*c.blueDetuningMHz/blue.transition.gamma, normalizedMHzFactor*c.shieldingMHz/green.transition.gamma,
-    normalizedMHzFactor*c.receiveMHz/green.transition.gamma, normalizedMHzFactor*c.compressMHz/green.transition.gamma,
-    c.loadGradient, c.receiveGradient, c.finalGradient, ['linear','smooth','geometric'].indexOf(c.powerRamp),
+    blue.inverseWaistSquared, green.inverseWaistSquared, green.factor*final.greenPowersMW[0], green.factor*final.greenPowersMW[4],
+    blue.factor*load.bluePowersMW[0], blue.factor*load.bluePowersMW[4], green.factor*load.greenPowersMW[0], green.factor*load.greenPowersMW[4],
+    normalizedMHzFactor*load.blueDetuningMHz/blue.transition.gamma, normalizedMHzFactor*load.greenDetuningMHz/green.transition.gamma,
+    normalizedMHzFactor*receive.greenDetuningMHz/green.transition.gamma, normalizedMHzFactor*final.greenDetuningMHz/green.transition.gamma,
+    load.gradientGCM, receive.gradientGCM, final.gradientGCM, ['linear','smooth','geometric'].indexOf(c.powerRamp ?? 'linear'),
   ]);
 }
 
@@ -50,7 +52,9 @@ function packFrames({model,field,program,grid}) {
     const stepMS = steps ? delta/steps : 0;
     const firstHeld = steps ? Math.max(0,Math.min(steps+1,Math.ceil((point.windowStart-start-1e-12)/stepMS))) : 1;
     const end = sequenceAt(program,point.time), k = f*16;
-    flags.set([stageIndex, steps, firstHeld, Number(Boolean(point.checkpoint))], k);
+    // 纯蓝装载和保持使用同一恒定光场；关源时刻只改变原子数方程。
+    const opticalStage = stage.id === 'hold' ? 0 : stageIndex;
+    flags.set([opticalStage, steps, firstHeld, Number(Boolean(point.checkpoint))], k);
     values.set([stepMS*.001,(start-stage.startMS)/stage.durationMS,stepMS/stage.durationMS,0,
       field.blue.factor*end.bluePowersMW[0], field.blue.factor*end.bluePowersMW[4],
       field.green.factor*end.greenPowersMW[0], field.green.factor*end.greenPowersMW[4],

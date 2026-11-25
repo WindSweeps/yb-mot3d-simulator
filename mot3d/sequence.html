@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#0b1725">
-  <title>Yb · 双色 MOT 实验时序</title>
+  <title>Yb · MOT 实验时序</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='15' fill='%23090c12'/%3E%3Ctext x='8' y='43' font-size='35' fill='%235ce1e6'%3EYb%3C/text%3E%3C/svg%3E">
   <link rel="stylesheet" href="./styles.css">
   <link rel="stylesheet" href="./sequence.css">
@@ -16,7 +16,7 @@
 <body class="sequence-page">
   <a class="skip-link" href="#sequence-editor">跳到通道时序</a>
   <header class="topbar">
-    <div class="brand"><span class="brand-mark" aria-hidden="true">Yb</span><div><h1>双色 MOT 实验时序</h1><p>¹⁷⁴Yb · 399 nm / 556 nm</p></div></div>
+    <div class="brand"><span class="brand-mark" aria-hidden="true">Yb</span><div><h1 id="sequence-heading">MOT 实验时序</h1><p id="sequence-wavelengths">¹⁷⁴Yb · 399 nm / 556 nm</p></div></div>
     <nav class="header-actions" aria-label="工作台"><a class="button quiet" href="./#demo">蓝 MOT 工作台</a><button class="button" id="sequence-import">导入时序</button><button class="button" id="sequence-export">导出时序</button><input type="file" id="sequence-file" accept=".json,application/json" hidden></nav>
   </header>
   <main class="sequence-workspace">
@@ -71,7 +71,7 @@
       <div class="scene-card" id="sequence-scene">
         <div class="sequence-scene-head"><div><h2>三维 MOT</h2><p id="sequence-stage-text">双色装载</p><p id="seq-scene-population"></p></div>
           <div class="sequence-views" aria-label="三维视角"><button type="button" class="small-button" data-seq-view="iso" aria-pressed="true">全景</button><button type="button" class="small-button" data-seq-view="xz" aria-pressed="false">XZ</button><button type="button" class="small-button" data-seq-view="cloud" aria-pressed="false" title="围绕磁场零点旋转和缩放。梯度为零时使用线圈几何中心。">云团放大</button></div></div>
-        <div id="sequence-viewport" class="scene-viewport" aria-label="双色 MOT 的六束光、线圈和原子"></div>
+        <div id="sequence-viewport" class="scene-viewport" aria-label="MOT 的六束光、线圈和原子"></div>
         <fieldset class="sequence-layers"><legend class="sr-only">三维图层</legend>
           <label><input type="checkbox" data-seq-layer="beams" checked> 光束</label><label><input type="checkbox" data-seq-layer="coils" checked> 线圈</label><label><input type="checkbox" data-seq-layer="trails" checked> 轨迹</label><label><input type="checkbox" data-seq-layer="fluorescence" checked> 荧光</label>
         </fieldset>
@@ -82,7 +82,7 @@
       <section id="sequence-curves" aria-label="原子数与 PSD">
         <div class="seq-curve-tools">
           <label>时间范围 <select id="seq-curve-stage">
-            <option value="all">完整时序</option><option value="load">双色装载</option><option value="handoff">交接</option><option value="green">纯绿接收</option><option value="compress">绿光压缩</option>
+            <option value="all">完整时序</option>
           </select></label>
           <output id="seq-curve-time" aria-label="游标时刻">0 ms</output>
         </div>
@@ -116,22 +116,23 @@
           <tr><th scope="row"><button type="button" class="text-button" data-checkpoint="2">纯绿接收 N₁</button></th><td id="seq-atoms-n1">—</td><td id="seq-n1">—</td><td id="seq-e1">—</td></tr>
           <tr><th scope="row"><button type="button" class="text-button" data-checkpoint="3">压缩结束 N₂</button></th><td id="seq-atoms-n2">—</td><td id="seq-n2">—</td><td id="seq-e2">—</td></tr>
         </tbody></table>
-        <p class="sequence-total">转移和压缩合计 N₂ / N₀ <output id="seq-transfer">—</output></p>
-        <p class="sequence-note">论文报告交接与压缩后约有 90% 的原子留存。<a href="https://arxiv.org/html/2503.24383v2#S5" target="_blank" rel="noopener">宋博组，第 V 节 ↗</a></p>
+        <p class="sequence-total"><span id="seq-total-label">转移和压缩合计 N₂ / N₀</span> <output id="seq-transfer">—</output></p>
+        <p class="sequence-note" id="seq-transfer-reference">论文报告交接与压缩后约有 90% 的原子留存。<a href="https://arxiv.org/html/2503.24383v2#S5" target="_blank" rel="noopener">宋博组，第 V 节 ↗</a></p>
         <p id="seq-window-note" class="sequence-note"></p>
         <details class="sequence-loading-controls"><summary>入射通量与各阶段损失</summary>
           <form id="seq-loading-inputs">
             <label>入射通量 Φ / (原子/s)<input name="flux" type="number" min="0" max="1e15" step="any" value="1e9" required></label>
             <table class="sequence-loss-table"><thead><tr><th scope="col">阶段 / 光场</th><th scope="col">单体 α<br>s⁻¹</th><th scope="col">双体 β<br>(原子·s)⁻¹</th></tr></thead><tbody>
-              <tr data-loss-stage="0"><th scope="row">装载<small></small></th><td><input aria-label="装载单体损失系数" name="alpha" type="number" min="0" max="1e4" step="any"></td><td><input aria-label="装载双体损失系数" name="beta" type="number" min="0" max="1" step="any"></td></tr>
-              <tr data-loss-stage="1"><th scope="row">交接<small></small></th><td><input aria-label="交接单体损失系数" name="handoffAlpha" type="number" min="0" max="1e4" step="any"></td><td><input aria-label="交接双体损失系数" name="handoffBeta" type="number" min="0" max="1" step="any"></td></tr>
-              <tr data-loss-stage="2"><th scope="row">纯绿接收<small></small></th><td><input aria-label="接收单体损失系数" name="greenAlpha" type="number" min="0" max="1e4" step="any"></td><td><input aria-label="接收双体损失系数" name="greenBeta" type="number" min="0" max="1" step="any"></td></tr>
-              <tr data-loss-stage="3"><th scope="row">压缩<small></small></th><td><input aria-label="压缩单体损失系数" name="compressAlpha" type="number" min="0" max="1e4" step="any"></td><td><input aria-label="压缩双体损失系数" name="compressBeta" type="number" min="0" max="1" step="any"></td></tr>
+              <tr data-loss-stage="load"><th scope="row">装载<small></small></th><td><input aria-label="装载单体损失系数" name="alpha" type="number" min="0" max="1e4" step="any"></td><td><input aria-label="装载双体损失系数" name="beta" type="number" min="0" max="1" step="any"></td></tr>
+              <tr data-loss-stage="handoff"><th scope="row">交接<small></small></th><td><input aria-label="交接单体损失系数" name="handoffAlpha" type="number" min="0" max="1e4" step="any"></td><td><input aria-label="交接双体损失系数" name="handoffBeta" type="number" min="0" max="1" step="any"></td></tr>
+              <tr data-loss-stage="green"><th scope="row">纯绿接收<small></small></th><td><input aria-label="接收单体损失系数" name="greenAlpha" type="number" min="0" max="1e4" step="any"></td><td><input aria-label="接收双体损失系数" name="greenBeta" type="number" min="0" max="1" step="any"></td></tr>
+              <tr data-loss-stage="compress"><th scope="row">压缩<small></small></th><td><input aria-label="压缩单体损失系数" name="compressAlpha" type="number" min="0" max="1e4" step="any"></td><td><input aria-label="压缩双体损失系数" name="compressBeta" type="number" min="0" max="1" step="any"></td></tr>
+              <tr data-loss-stage="hold" hidden><th scope="row">关源保持<small></small></th><td><input aria-label="保持单体损失系数" name="holdAlpha" type="number" min="0" max="1e4" step="any"></td><td><input aria-label="保持双体损失系数" name="holdBeta" type="number" min="0" max="1" step="any"></td></tr>
             </tbody></table>
           </form>
           <p class="sequence-note">装载时按 dN/dt = Φp − αN − βN² 计算，其中 p 为轨迹捕获率。关闭原子束后，模型按阱内原子数继续计算单体与双体损失，并按轨迹统计逃逸。表中装载效率为轨迹捕获率，后续转移效率为含损失的原子数之比。</p>
-          <p class="sequence-note">按论文的双色装载率 8.4 × 10⁷ 原子/s 计算，稳态为 1.16 × 10⁸ 个原子，表 II 报告 1.15 × 10⁸。网页预设采用上方通量与模拟捕获率计算装载率。</p>
-          <p class="sequence-note">系数随开启的光色选择。装载使用宋博组表 II 的装载拟合，交接、接收和压缩沿用对应光色的关源保持拟合。论文的 β 按整团原子数定义，纯绿光 β ≈ 0，计算取零。双光均关闭时，单体背景损失按论文给出的上限 0.012 s⁻¹ 估算，双体系数取零。输入数值可单独标定各阶段，清空即可恢复默认值。<a href="https://arxiv.org/html/2503.24383v2#S5.T2" target="_blank" rel="noopener">宋博组，表 II 与式（3）↗</a></p>
+          <p class="sequence-note" id="seq-loading-reference">按论文的双色装载率 8.4 × 10⁷ 原子/s 计算，稳态为 1.16 × 10⁸ 个原子，表 II 报告 1.15 × 10⁸。网页预设采用上方通量与模拟捕获率计算装载率。</p>
+          <p class="sequence-note">系数随开启的光色选择。装载使用宋博组表 II 的装载拟合，关闭原子束后使用对应光色的保持拟合。论文的 β 按整团原子数定义，纯绿光 β ≈ 0，计算取零。双光均关闭时，单体背景损失按论文给出的上限 0.012 s⁻¹ 估算，双体系数取零。输入数值可单独标定各阶段，清空即可恢复默认值。<a href="https://arxiv.org/html/2503.24383v2#S5.T2" target="_blank" rel="noopener">宋博组，表 II 与式（3）↗</a></p>
         </details>
       </section>
     </div>
@@ -155,7 +156,8 @@
       <p>各通道共享一条以毫秒计的时间轴。同一时间戳上的光强、频率和梯度同时生效。浏览器只在本机模拟这组事件。<a href="https://m-labs.hk/artiq/manual/rtio.html#timeline-and-output-events" target="_blank" rel="noopener">ARTIQ 时间轴与输出事件 ↗</a></p>
       <p>宋博组在双色装载时将 556 nm 设为蓝失谐。交接开始时，绿光跳至红失谐，399 nm 在 1 ms 内关闭。压缩时改变绿光失谐、降低功率并提高梯度。网页把论文的两对强光分配给 V1、V2，一对弱光分配给沿 Y 轴的 H。<a href="https://arxiv.org/pdf/2503.24383v2#page=3" target="_blank" rel="noopener">Li 等，第 V 节 ↗</a></p>
       <p>arXiv:2503.24383v2 预设取纯绿接收 10 ms，弱光每束按初始功率比例降至 14.9 µW。AI 优化预设以压缩结束时的六维高斯等效峰值相空间密度为优化目标。</p>
-      <p>装载阶段用最初 20 ms 的轨迹估计捕获概率，并用速率方程计算整个装载时段的原子数。交接和压缩逐步积分同一批留存原子。温度由扣除云团平均速度后的三维速度方差计算，RMS 半径由相对云心的三维位移计算。</p>
+      <p>纯蓝 MOT 使用宋博组的 399 nm 参数，按图 4(b) 装载 5 s。随后关闭原子束，蓝光和磁场继续囚禁原子。预设的 100 ms 保持时间是可调的模拟观察窗口。<a href="https://arxiv.org/html/2503.24383v2#S5" target="_blank" rel="noopener">Li 等，第 V 节 ↗</a></p>
+      <p>装载阶段用最初 20 ms 的轨迹估计捕获概率，并用速率方程计算整个装载时段的原子数。关闭原子束后逐步积分同一批留存原子。温度由扣除云团平均速度后的三维速度方差计算，RMS 半径由相对云心的三维位移计算。</p>
       <p>WebGPU 并行积分各条轨迹，三维视图显示采样位置和相对荧光亮度，相机用每条阱内轨迹代表的原子数计算信号。提高轨迹数可降低捕获比例和云团分布的抽样波动。绝对原子数取决于入射通量、捕获率和损失系数。宋博组报告的压缩末态约为 10⁸ 个原子。<a href="https://arxiv.org/html/2503.24383v2#S5" target="_blank" rel="noopener">Li 等，第 V 节 ↗</a></p>
       <p>成像视场以曝光结束时的磁场中心为原点。荧光使用阱内样本在曝光窗内的散射率，合并两种波长时采用相同的探测效率。弱探针吸收按柱密度计算透射光，再经过成像系统模糊并扣除暗场，得到光学厚度。图像给出相机的期望信号，未加入随机读出噪声、多重散射或探针反冲。<a href="https://arxiv.org/pdf/1509.03233#page=9" target="_blank" rel="noopener">Yamamoto 等，Yb 荧光探测效率 ↗</a> · <a href="https://arxiv.org/pdf/0707.2930#page=2" target="_blank" rel="noopener">Reinaudi 等，三帧吸收成像 ↗</a></p>
     </details>

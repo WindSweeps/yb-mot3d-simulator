@@ -100,7 +100,7 @@ function inside(p, v) {
 }
 
 function observationGrid(program) {
-  const [load, handoff, green, compress] = program.stages;
+  const [load, next, green, compress] = program.stages;
   const loadEnd = Math.min(load.endMS, 20);
   const grid = [{ time: 0 }];
   function section(start, end, interval, cap, windowStart, checkpoint) {
@@ -112,8 +112,14 @@ function observationGrid(program) {
   }
   section(0, loadEnd, .1, 200, Math.max(0, loadEnd-5), 'N0');
   if (loadEnd < load.endMS) grid.push({ time: load.endMS, freeze: true });
-  const greenWindow = Math.max(handoff.startMS, green.endMS-5);
-  section(handoff.startMS, handoff.endMS, .1, 32, greenWindow);
+  if (next.id === 'hold') {
+    const midpoint = program.checkpointTimesMS[1];
+    section(next.startMS, midpoint, .5, 150, Math.max(next.startMS, midpoint-5), 'N1');
+    section(midpoint, next.endMS, .5, 150, Math.max(midpoint, next.endMS-5), 'N2');
+    return { grid, loadEnd };
+  }
+  const greenWindow = Math.max(next.startMS, green.endMS-5);
+  section(next.startMS, next.endMS, .1, 32, greenWindow);
   section(green.startMS, green.endMS, .25, 80, greenWindow, 'N1');
   section(compress.startMS, compress.endMS, .5, 150, Math.max(compress.startMS,compress.endMS-5), 'N2');
   return { grid, loadEnd };
