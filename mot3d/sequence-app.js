@@ -112,10 +112,15 @@ function showAtoms(output, count) {
 function refreshCurves() {
   const points = [];
   if (population) {
+    const end = program.stages[0].endMS;
     for (const [frame, time] of result.timesMS.entries()) {
+      // 关源后，帧内权重连续演化，阱内轨迹数只在下一帧更新。
+      if (frame > 0 && time > end) {
+        const before = cloudReadout(program, result, population, time, frame - 1);
+        points.push({...before, leftLimit:true});
+      }
       points.push(cloudReadout(program, result, population, time, frame));
       // 装载等待期复用捕获云快照，原子数继续按非线性装载方程增长。
-      const end = program.stages[0].endMS;
       if (time === result.loadWindowMS && end > time) {
         for (let i = 1; i < 160; i++) points.push(cloudReadout(program, result, population, time + (end - time) * (i / 160) ** 2, frame));
       }
