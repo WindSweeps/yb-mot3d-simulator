@@ -255,6 +255,7 @@ async function checkPopulation(page, high) {
 
 async function checkEngines(page) {
   const select=page.locator('#sequence-engine [data-engine-select]');
+  const confirm=page.locator('#sequence-engine [data-engine-confirm]');
   const lastId=()=>page.evaluate(()=>window.sequenceScaleTest.jobs.at(-1).id);
   async function exportExperiment() {
     const download=page.waitForEvent('download');
@@ -269,9 +270,24 @@ async function checkEngines(page) {
   }
   async function chooseEngine(engine) {
     const previous=await lastId();
+    const jobCount=await page.evaluate(()=>window.sequenceScaleTest.jobs.length);
     await page.getByRole('link',{name:'模拟引擎',exact:true}).click();
+    const applied=await select.inputValue();
+    const simulation=await page.locator('#sequence-engine').getAttribute('data-simulation');
+    assert.ok(await confirm.isDisabled());
     await select.selectOption(engine);
+    await checkGuide(simulation,engine);
+    assert.ok(await confirm.isEnabled());
+    assert.ok(await page.locator('[data-action=play]').isEnabled());
+    assert.equal((await exportExperiment()).params.engine,applied);
+    await select.selectOption(applied);
+    assert.ok(await confirm.isDisabled());
+    assert.equal(await lastId(),previous);
+    await select.selectOption(engine);
+    await confirm.click();
+    assert.ok(await confirm.isDisabled());
     await waitForResult(page,previous);
+    assert.equal(await page.evaluate(()=>window.sequenceScaleTest.jobs.length),jobCount+1);
     assert.equal(await page.evaluate(()=>window.sequenceScaleTest.result.engine),engine);
     assert.equal(await page.evaluate(()=>window.sequenceScaleTest.jobs.at(-1).engine),engine);
     const label=await select.locator('option:checked').textContent();
@@ -300,12 +316,17 @@ async function checkEngines(page) {
     return sum/count;
   });
   const lightRate=await meanBlue();
+  await select.selectOption('rate-equations');
+  await importExperiment(reference);
+  assert.equal(await select.inputValue(),'lightweight');
+  assert.ok(await confirm.isDisabled());
   await chooseEngine('rate-equations');
   await checkGuide('two-color','rate-equations');
   const rate=await meanBlue();
   assert.ok(Math.abs(rate-lightRate)>.001*lightRate,JSON.stringify({lightRate,rate}));
   const selected=await exportExperiment();
   assert.equal(selected.params.engine,'rate-equations');
+  await select.selectOption('lightweight');
   await page.getByRole('tab',{name:'梯度优化'}).click();
   const opt=page.locator('#seq-opt-form');
   await opt.locator('[name=objective]').selectOption('optical.blue.scattering');
@@ -324,6 +345,7 @@ async function checkEngines(page) {
   await opt.locator('[data-opt=apply]').click();
   await waitForResult(page,previous);
   await checkGuide('blue','rate-equations');
+  assert.ok(await confirm.isDisabled());
   assert.ok(Math.abs(await meanBlue()/best-1)<.001);
   assert.ok(await page.evaluate(()=>window.sequenceScaleTest.result.greenRates.every(r=>r===0)));
   await chooseEngine('lightweight');

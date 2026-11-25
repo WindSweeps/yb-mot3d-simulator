@@ -71,39 +71,55 @@ function describe(simulation, engine) {
 export function mountEnginePanel(host, {simulation, engine = defaultEngine, onSelect}) {
   host.classList.add('engine-panel');
   host.innerHTML =
-    '<label class="engine-picker"><span>模拟引擎</span><select data-engine-select></select></label>' +
+    '<div class="engine-picker"><label>模拟引擎</label><select data-engine-select></select>' +
+    '<button type="button" class="button" data-engine-confirm disabled>确认并重算</button></div>' +
+    '<p class="engine-pending" role="status"></p>' +
     '<p class="engine-intro"></p><div class="engine-principles">' +
     '<figure class="engine-scheme"><img><figcaption></figcaption></figure>' +
     '<dl class="engine-equations"></dl></div>' +
     '<details class="engine-notes"><summary>符号与近似</summary><p></p><p></p></details>';
   const select = host.querySelector('[data-engine-select]');
+  select.id = host.id + '-select';
+  host.querySelector('.engine-picker label').htmlFor = select.id;
+  const confirm = host.querySelector('[data-engine-confirm]');
+  const pending = host.querySelector('.engine-pending');
   const intro = host.querySelector('.engine-intro');
   const image = host.querySelector('img'), caption = host.querySelector('figcaption');
   const equations = host.querySelector('dl'), notes = host.querySelectorAll('.engine-notes p');
   let activeSimulation, activeEngine;
 
-  function update({simulation, engine = defaultEngine}) {
-    if (simulation === activeSimulation && engine === activeEngine) return;
-    const available = availableEngines(simulation);
-    if (!available.some(option => option.id === engine))
-      throw new RangeError('所选引擎无法运行当前模拟。');
-    if (simulation !== activeSimulation) select.replaceChildren(...available.map(({id, label}) => new Option(label, id)));
-    activeSimulation = simulation;
-    activeEngine = engine;
-    select.value = engine;
-    host.dataset.engine = engine;
-    host.dataset.simulation = simulation;
-    const guide = describe(simulation, engine);
+  function preview() {
+    const engine = select.value;
+    confirm.disabled = engine === activeEngine;
+    pending.textContent = confirm.disabled ? '' : '当前使用' +
+      availableEngines(activeSimulation).find(option => option.id === activeEngine).label + '，所选引擎待确认。';
+    const guide = describe(activeSimulation, engine);
     intro.textContent = guide.intro;
     image.alt = guide.alt;
-    image.src = new URL('./engine-diagrams/' + simulation + '-' + engine + '.svg', import.meta.url).href;
+    image.src = new URL('./engine-diagrams/' + activeSimulation + '-' + engine + '.svg', import.meta.url).href;
     caption.textContent = guide.caption;
     equations.innerHTML = guide.equations;
     notes[0].innerHTML = guide.terms + guide.population;
     notes[1].innerHTML = guide.dark + guide.recoil;
   }
 
-  select.addEventListener('change', () => {
+  function update({simulation, engine = defaultEngine}) {
+    if (activeSimulation === simulation && activeEngine === engine && select.value === engine) return;
+    const available = availableEngines(simulation);
+    if (!available.some(option => option.id === engine))
+      throw new RangeError('所选引擎无法运行当前模拟。');
+    if (simulation !== activeSimulation) select.replaceChildren(...available.map(({id, label}) => new Option(label, id)));
+    activeSimulation = simulation;
+    activeEngine = engine;
+    host.dataset.simulation = simulation;
+    host.dataset.engine = engine;
+    select.value = engine;
+    preview();
+  }
+
+  select.addEventListener('change', preview);
+  confirm.addEventListener('click', () => {
+    if (select.value === activeEngine) return;
     update({simulation:activeSimulation, engine:select.value});
     onSelect(activeEngine);
   });

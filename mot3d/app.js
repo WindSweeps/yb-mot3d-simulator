@@ -199,7 +199,6 @@ function announce(message) {
 }
 
 function syncControls(except = null) {
-  enginePanel.update({simulation: "blue", engine: params.engine});
   controls.forEach(({ spec, number, range }) => {
     const value = String(valueAt(spec.key));
     if (number !== except) number.value = value;
@@ -572,6 +571,7 @@ function replaceParams(next, incidentFlux = DEFAULT_FLUX) {
   scene?.setFluorescenceFlux(incidentFlux);
   const changed = JSON.stringify(params) !== JSON.stringify(restored);
   params = restored;
+  enginePanel.update({simulation: "blue", engine: params.engine});
   syncControls();
   if (changed || !result) parametersChanged({ immediate: true });
   else if (!fluorescencePanel.hidden) fluorescence.show(selectedFrame());

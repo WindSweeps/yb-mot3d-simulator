@@ -223,6 +223,7 @@ const curves = mountSequenceCurves($('#sequence-curves'), t => { editor.pause();
 const editor = mountSequenceEditor($('#sequence-editor'), {
   initialPreset,
   onPreset(id) {
+    if (!suspended) enginePanel.update({simulation, engine:params.engine});
     observeAtMS = id === 'imported' ? importedObserveAtMS : undefined;
     const url = new URL(location.href);
     if (id === 'imported') url.searchParams.delete('preset');
@@ -245,6 +246,7 @@ const editor = mountSequenceEditor($('#sequence-editor'), {
     if (!suspended && simulation !== nextSimulation) {
       engineBySimulation.set(simulation, params.engine);
       params = {...params, engine:engineBySimulation.get(nextSimulation) ?? defaultEngine};
+      enginePanel.update({simulation:nextSimulation, engine:params.engine});
     }
     simulation = nextSimulation;
     program = compiled;
@@ -310,6 +312,7 @@ function loadExperiment(experiment, preset, targetMS) {
       optimization.setTargetTime(targetMS);
     }
   } finally { suspended = false; }
+  enginePanel.update({simulation, engine:params.engine});
   recalculate();
 }
 
@@ -333,7 +336,6 @@ function cancelRun() {
 }
 
 function recalculate() {
-  enginePanel.update({simulation, engine:params.engine});
   showReferenceLoss();
   cancelRun();
   if (!editValid || !form.checkValidity()) {
