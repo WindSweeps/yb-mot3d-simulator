@@ -40,7 +40,7 @@ try {
   }
   assert.match(await annotations.innerText(), /关源 5000 ms/);
   assert.match(await annotations.innerText(), /观测结束 10000 ms/);
-  // 检查关源原子数及阈值在真实 SVG 中的位置，覆盖长时序在对数轴上压缩的情况。
+  // 用关源读数核对留存比例纵轴和实验时间横轴。
   await button.click();
   assert.equal(await range.inputValue(), 'decay');
   assert.equal(await button.getAttribute('aria-pressed'), 'true');
@@ -58,8 +58,26 @@ try {
   assert.doesNotMatch(axes,/PSD/);
   await button.click();
   assert.equal(await range.inputValue(), 'all');
-  assert.match(await panel.locator('.seq-curve-axes').textContent(), /PSD/);
-  assert.ok(await panel.locator('#seq-curve-atom-scale').isVisible());
+  for (const stage of ['all','hold']) {
+    await range.selectOption(stage);
+    const axes = panel.locator('.seq-curve-axes');
+    assert.match(await axes.textContent(), /阱内原子数 \/ 个 · 线性刻度/);
+    assert.match(await axes.textContent(), /峰值 PSD \/ 无量纲 · 线性刻度/);
+    const ticks = await axes.locator('line + text[text-anchor="end"]').evaluateAll(labels =>
+      labels.filter(label => label.previousElementSibling.y1.baseVal.value === label.previousElementSibling.y2.baseVal.value)
+        .map(label => ({value:Number(label.textContent),y:label.previousElementSibling.y1.baseVal.value})));
+    assert.equal(ticks.length, 6);
+    for (const band of [ticks.slice(0,3),ticks.slice(3)]) {
+      const [zero,half,peak] = band;
+      assert.equal(zero.value, 0);
+      assert.ok(peak.value > 0 && Math.abs(half.value / peak.value - .5) < .05);
+      assert.equal(zero.y - half.y, half.y - peak.y);
+    }
+    const zero = ticks[0].y;
+    const cutoffY = Number(await guide.locator('rect').getAttribute('y')) + 3;
+    const targetY = Number(await guide.locator('line').getAttribute('y1'));
+    assert.ok(Math.abs((zero-targetY)/(zero-cutoffY) - 1/Math.E) < 1e-12);
+  }
   state.config.holdMS = 1;
   await importState(state, () => document.querySelector('#seq-curve-tau-loss').dataset.status === 'lower-bound');
   assert.equal(await guide.locator('circle').count(),0);

@@ -24,29 +24,10 @@ export function retentionScale(values, loaded) {
   return {fraction:value => value/peak, ticks, tickLabel:value => percent.format(value/loaded), label:'线性刻度'};
 }
 
-export function verticalScale(key, values, atomMode) {
+export function linearScale(values) {
   const max = Math.max(0, ...values);
-  const smallestPositive = Math.min(...values.filter(value => value > 0));
-  if (key === 'atoms' && max > 0 && (atomMode === 'log' || (atomMode === 'auto' && max/smallestPositive >= 10))) {
-    // log(1+N) 在 N=0 时恰好为零；刻度标签仍以实际原子数标注。
-    const span = Math.log1p(max);
-    const fraction = value => Math.log1p(value) / span;
-    const ticks = [0];
-    for (let n = 1; n < max; n *= 10) {
-      const level = fraction(n);
-      if (level - fraction(ticks.at(-1)) >= .20 && 1 - level >= .20) ticks.push(n);
-    }
-    if (ticks.length === 1) ticks.push(Math.expm1(span/2));
-    ticks.push(max);
-    return {fraction, ticks, label:'对数刻度 log₁₀(1 + N)'};
-  }
-  if (key === 'psd' && values.every(value => value > 0) && max/smallestPositive >= 10) {
-    const lo = Math.floor(Math.log10(smallestPositive)), hi = Math.ceil(Math.log10(max));
-    return {fraction:value => (Math.log10(value)-lo)/(hi-lo),
-      ticks:[10**lo, 10**((hi+lo)/2), 10**hi], label:'对数刻度'};
-  }
   return {fraction:value => value/(max || 1), ticks:max > 0 ? [0,max/2,max] : [0],
-    label:key === 'atoms' ? '线性刻度' : ''};
+    label:'线性刻度'};
 }
 
 export function mountSequenceCurves(section, onSeek) {
@@ -56,14 +37,6 @@ export function mountSequenceCurves(section, onSeek) {
   const axes = section.querySelector('.seq-curve-axes');
   const cursor = section.querySelector('#seq-curve-cursor');
   const timeOutput = section.querySelector('#seq-curve-time');
-  const scaleLabel = document.createElement('label');
-  const atomMode = document.createElement('select');
-  atomMode.id = 'seq-curve-atom-scale';
-  atomMode.add(new Option('自动', 'auto'));
-  atomMode.add(new Option('线性', 'linear'));
-  atomMode.add(new Option('对数（含零）', 'log'));
-  scaleLabel.append('原子数纵轴 ', atomMode);
-  timeOutput.before(scaleLabel);
   const atomMarker = svgElement('circle', {id:'seq-curve-atom-marker', r:3.5, visibility:'hidden',
     fill:'var(--lime)', stroke:'var(--panel)', 'aria-hidden':'true'});
   area.before(atomMarker);
@@ -141,8 +114,6 @@ export function mountSequenceCurves(section, onSeek) {
     plot.setAttribute('aria-valuemax', end);
     plot.tabIndex = visible.length ? 0 : -1;
     select.disabled = !points.length;
-    scaleLabel.hidden = decay;
-    atomMode.disabled = !points.length || decay;
     decayButton.setAttribute('aria-pressed',String(decay));
     decayButton.textContent = decay ? '返回原时间范围' : '查看关源衰减';
     axes.replaceChildren();
@@ -153,9 +124,9 @@ export function mountSequenceCurves(section, onSeek) {
     }
     function drawBand(key, title, top, path, size = bandHeight) {
       const values = visible.map(p => p[key]).filter(Number.isFinite);
-      const scale = decay && loaded > 0 ? retentionScale(values, loaded) : verticalScale(key, values, atomMode.value);
+      const scale = decay && loaded > 0 ? retentionScale(values, loaded) : linearScale(values);
       const yAt = value => top + size * (1 - scale.fraction(value));
-      label(3, top-8, scale.label ? title + ' · ' + scale.label : title);
+      label(3, top-8, title + ' · ' + scale.label);
       for (const tick of scale.ticks) {
         const y = yAt(tick);
         line(plotLeft, y, width-plotRight, y);
@@ -241,7 +212,6 @@ export function mountSequenceCurves(section, onSeek) {
     else { previousRange = select.value; select.value = 'decay'; }
     showRange();
   });
-  atomMode.addEventListener('change', render);
   const observer = new ResizeObserver(render);
   observer.observe(plot);
 
