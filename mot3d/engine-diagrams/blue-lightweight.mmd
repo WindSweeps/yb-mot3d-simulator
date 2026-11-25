@@ -1,7 +1,13 @@
-flowchart TB
-    G["¹S₀ 基态"] -->|"399 nm"| B["¹P₁ 有效激发态"]
-    B -->|"经 D 态级联"| D["³P₀、³P₂ 暗态"]
-    classDef blue fill:#152c42,stroke:#6cc7ff,color:#d2efff
-    classDef dark fill:#2c231b,stroke:#ba8956,color:#ffcf96
-    class B blue
-    class D dark
+flowchart BT
+    accTitle: ¹⁷⁴Yb 蓝光轻量散射模型能级图
+    accDescr: 能量向上递增。399 nm 冷却循环驱动蓝光跃迁。蓝光虚线标注经 ³D 态级联至三个末态的有效分支比。
+    G["¹S₀<br/>基态"]
+    B["¹P₁<br/>有效激发态"]
+    V["³P₁<br/>荧光返回"]
+    P0["³P₀<br/>长寿命暗态"]
+    P2["³P₂<br/>长寿命暗态"]
+    G <-->|"399 nm"| B
+    V -->|"556 nm"| G
+    B -.->|"3.38 × 10⁻⁸"| P0
+    B -.->|"2.87 × 10⁻⁸"| V
+    B -.->|"2.02 × 10⁻⁹"| P2

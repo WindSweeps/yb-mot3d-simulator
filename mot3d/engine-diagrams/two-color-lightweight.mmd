@@ -1,11 +1,14 @@
-flowchart TB
-    G["¹S₀ 共享基态"] -->|"399 nm"| B["¹P₁ 有效激发态"]
-    G -->|"556 nm"| V["³P₁ 有效激发态"]
-    B -->|"经 D 态级联"| DB["³P₀、³P₂ 暗态"]
-    V -->|"磁偶极跃迁"| DV["³P₀ 暗态"]
-    classDef blue fill:#152c42,stroke:#6cc7ff,color:#d2efff
-    classDef green fill:#192f24,stroke:#a3d68b,color:#dcf7d3
-    classDef dark fill:#2c231b,stroke:#ba8956,color:#ffcf96
-    class B blue
-    class V green
-    class DB,DV dark
+flowchart BT
+    accTitle: ¹⁷⁴Yb 蓝绿光轻量散射模型能级图
+    accDescr: 能量向上递增。399 nm 与 556 nm 两个冷却循环共享基态。蓝光虚线标注经 ³D 态级联至三个末态的有效分支比。绿光磁偶极分支通往 ³P₀。
+    G["¹S₀<br/>共享基态"]
+    B["¹P₁<br/>有效激发态"]
+    V["³P₁<br/>有效激发态"]
+    P0["³P₀<br/>长寿命暗态"]
+    P2["³P₂<br/>长寿命暗态"]
+    G <-->|"399 nm"| B
+    G <-->|"556 nm"| V
+    B -.->|"3.38 × 10⁻⁸"| P0
+    B -.->|"2.87 × 10⁻⁸"| V
+    B -.->|"2.02 × 10⁻⁹"| P2
+    V -->|"5.54 × 10⁻⁹"| P0

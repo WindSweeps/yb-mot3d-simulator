@@ -1,4 +1,7 @@
 import { availableEngines, defaultEngine } from './engines.js';
+import { DARK_BRANCHES, EMISSION_BRANCHES } from './branching.js';
+
+const returnProbability = new Intl.NumberFormat('zh-CN', {style:'percent', maximumFractionDigits:7});
 
 const sub = (symbol, index) => '<msub><mi>' + symbol + '</mi><mi>' + index + '</mi></msub>';
 const sum = index => '<munder><mo>∑</mo><mi>' + index + '</mi></munder>';
@@ -45,8 +48,9 @@ function describe(simulation, engine) {
   const twoColor = simulation === 'two-color', resolved = engine === 'rate-equations';
   const states = twoColor ? '¹P₁ 和 ³P₁ 各有三个磁子能级' : '¹P₁ 有三个磁子能级';
   const light = twoColor ? '399 nm 和 556 nm 光分别激发 ¹P₁ 和 ³P₁' : '399 nm 光激发 ¹P₁';
-  const branches = twoColor ? '蓝光经级联进入 ³P₀、³P₂，绿光可经磁偶极跃迁进入 ³P₀。' :
-    '蓝光经 D 态级联可进入 ³P₀ 或 ³P₂。';
+  const branches = '¹P₁ 经 ³D 态级联到 ³P₀、³P₁、³P₂ 的有效分支比分别为 ' +
+    [DARK_BRANCHES.blueP0, EMISSION_BRANCHES.blue556, DARK_BRANCHES.blueP2].map(b => b.toExponential(2)).join('、') + '。' +
+    (twoColor ? '³P₁ 到 ³P₀ 的磁偶极分支比估计为 ' + DARK_BRANCHES.greenP0.toExponential(2) + '。' : '');
   const intro = resolved ?
     states + '。在原子当前位置求解各态布居，用吸收与受激发射的净动量推进轨迹。' :
     (twoColor ? '先分别计算 399 nm 和 556 nm 单独照明时的散射率，再按共享的基态布居修正各束光力。' :
@@ -60,8 +64,11 @@ function describe(simulation, engine) {
   const recoil = twoColor ? '启用随机反冲时，蓝光采用动量扩散，绿光逐次抽样散射事件。' :
     '启用随机反冲时，蓝光用动量扩散计算速度涨落。';
   return {intro, terms, population, recoil,
-    alt:'从 ¹S₀ 基态出发，' + light + '。' + (resolved ? states + '。' : '') + branches,
-    caption:'主要自发衰变返回 ¹S₀。进入长寿命暗态的原子退出亮态捕获计数。',
+    alt:'¹⁷⁴Yb 能级从低到高依次为 ¹S₀、³P₀、³P₁、³P₂、¹P₁。' + light + '。' + (resolved ? states + '。' : '') + branches,
+    caption:'能量向上，间距仅示意。¹P₁ 直接返回基态的概率约为 ' + returnProbability.format(EMISSION_BRANCHES.blue399) +
+      '。图中通往 ³P₀、³P₁、³P₂ 的蓝光分支比均计入经过 ³D 态的完整级联。³P₀、³P₂ 为暗态。' +
+      (twoColor ? '³P₁ 发射 556 nm 光返回基态的概率约为 ' + returnProbability.format(EMISSION_BRANCHES.green556) +
+        '，其通往 ³P₀ 的磁偶极分支比按 LS 耦合估算。' : '到达 ³P₁ 的原子发射 556 nm 光返回基态。'),
     dark: (twoColor ? '<var>R<sub>b</sub></var>、<var>R<sub>g</sub></var> 是蓝光和绿光的总散射率。' :
       '<var>R<sub>b</sub></var> 是蓝光总散射率。') +
       'b 是一次衰变进入对应暗态的概率。亮态存活概率随累计的 κ 按指数衰减。',
@@ -75,16 +82,24 @@ export function mountEnginePanel(host, {simulation, engine = defaultEngine, onSe
     '<button type="button" class="button" data-engine-confirm disabled>确认并重算</button></div>' +
     '<p class="engine-pending" role="status"></p>' +
     '<p class="engine-intro"></p><div class="engine-principles">' +
-    '<figure class="engine-scheme"><img><figcaption></figcaption></figure>' +
+    '<figure class="engine-scheme"><figcaption><strong>¹⁷⁴Yb 能级与分支比</strong>' +
+    '<a class="engine-original" target="_blank" rel="noopener">查看原图</a></figcaption>' +
+    '<div class="engine-diagram-scroll" role="region" aria-label="能级图" tabindex="0"><img></div>' +
+    '<p class="engine-pan-hint">左右滚动可查看全部跃迁。</p><p class="engine-caption"></p></figure>' +
     '<dl class="engine-equations"></dl></div>' +
-    '<details class="engine-notes"><summary>符号与近似</summary><p></p><p></p></details>';
+    '<details class="engine-notes"><summary>符号、近似与来源</summary><p></p><p></p>' +
+    '<p class="engine-references"><a href="https://physics.nist.gov/PhysRefData/Handbook/Tables/ytterbiumtable5.htm" target="_blank" rel="noopener">NIST 镱能级表</a>' +
+    '<a href="https://arxiv.org/pdf/1111.6225#page=3" target="_blank" rel="noopener">Cho 等 · 蓝光级联速率</a>' +
+    '<a data-green-reference href="https://arxiv.org/pdf/1208.0552#page=9" target="_blank" rel="noopener">Beloy 等 · 磁偶极矩阵元</a>' +
+    '<a data-green-reference href="https://physics.nist.gov/Pubs/AtSpec/node17.html" target="_blank" rel="noopener">NIST 磁偶极辐射公式</a></p></details>';
   const select = host.querySelector('[data-engine-select]');
   select.id = host.id + '-select';
   host.querySelector('.engine-picker label').htmlFor = select.id;
   const confirm = host.querySelector('[data-engine-confirm]');
   const pending = host.querySelector('.engine-pending');
   const intro = host.querySelector('.engine-intro');
-  const image = host.querySelector('img'), caption = host.querySelector('figcaption');
+  const image = host.querySelector('img'), caption = host.querySelector('.engine-caption');
+  const original = host.querySelector('.engine-original'), greenReferences = host.querySelectorAll('[data-green-reference]');
   const equations = host.querySelector('dl'), notes = host.querySelectorAll('.engine-notes p');
   let activeSimulation, activeEngine;
 
@@ -97,6 +112,8 @@ export function mountEnginePanel(host, {simulation, engine = defaultEngine, onSe
     intro.textContent = guide.intro;
     image.alt = guide.alt;
     image.src = new URL('./engine-diagrams/' + activeSimulation + '-' + engine + '.svg', import.meta.url).href;
+    original.href = image.src;
+    for (const link of greenReferences) link.hidden = activeSimulation !== 'two-color';
     caption.textContent = guide.caption;
     equations.innerHTML = guide.equations;
     notes[0].innerHTML = guide.terms + guide.population;

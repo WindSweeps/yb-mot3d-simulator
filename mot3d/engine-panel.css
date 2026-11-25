@@ -30,7 +30,8 @@
 }
 .engine-panel .engine-intro,
 .engine-panel .engine-notes p,
-.engine-panel .engine-scheme figcaption {
+.engine-panel .engine-scheme figcaption,
+.engine-panel .engine-scheme p {
   margin: 0;
   color: var(--muted);
   font: 400 var(--meta)/1.65 var(--sans);
@@ -40,7 +41,8 @@
 .engine-principles { display: grid; gap: 12px; align-items: start; }
 .engine-scheme {
   display: grid;
-  justify-items: center;
+  container: engine-figure / inline-size;
+  grid-template-columns: minmax(0, 1fr);
   gap: 9px;
   min-width: 0;
   padding: 10px;
@@ -49,8 +51,17 @@
   border: 1px solid var(--line-soft);
   border-radius: 6px;
 }
-.engine-scheme img { display: block; width: auto; max-width: 100%; height: 12rem; object-fit: contain; }
-.engine-panel .engine-scheme figcaption { max-width: 30rem; }
+.engine-diagram-scroll { overflow-x: auto; }
+.engine-scheme img { display: block; width: 100%; min-width: 37.5rem; height: auto; }
+.engine-scheme figcaption { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0 8px; }
+.engine-scheme figcaption strong { color: var(--text); }
+.engine-pan-hint { display: none; }
+@container engine-figure (max-width: 37.49rem) {
+  .engine-pan-hint { display: block; }
+}
+.engine-scheme a, .engine-references a { color: var(--cyan); text-underline-offset: .2em; }
+.engine-references { display: flex; flex-wrap: wrap; gap: 6px 12px; }
+.engine-diagram-scroll:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
 .engine-equations { display: grid; gap: 8px; min-width: 0; margin: 0; }
 .engine-equation { min-width: 0; border-left: 2px solid var(--line); padding-left: 9px; }
 .engine-equation dt { color: var(--cyan); font: 500 var(--meta)/1.5 var(--sans); }
@@ -59,6 +70,6 @@
 .engine-notes { margin-top: 12px; }
 .engine-notes summary { cursor: pointer; color: var(--muted); font: 500 var(--meta)/1.6 var(--sans); }
 .engine-panel .engine-notes[open] p { margin-top: 6px; }
-@container (min-width: 32rem) {
-  .engine-principles { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; }
+@container (min-width: 56rem) {
+  .engine-principles { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); align-items: center; }
 }
