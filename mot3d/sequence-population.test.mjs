@@ -137,4 +137,12 @@ for (const [speed, dropMS] of [[.05,60],[.03002,100]]) {
   const pop = sequencePopulation(compileSequence(driftConfig), drift, {...lossless,holdAlpha:0,holdBeta:0});
   assert.deepEqual(pop.timeConstants().loss, {status:'reached', timeMS:dropMS});
 }
+
+// 蓝光恢复力使从阱边向外运动的原子重新进入计数范围。末帧回升仍须报告首次降至阈值的时刻。
+const blueReturn = {...driftConfig, blueEnabled:true};
+const returning = simulateSequence({...params,n:1}, blueReturn, {initialStates:[.0029,0,0,.2,0,0]});
+assert.deepEqual(returning.summary, {N0:1,N1:1,N2:1});
+assert.equal(returning.metrics[2].count, 0);
+const beforeReturn = sequencePopulation(compileSequence(blueReturn), returning, {...lossless,holdAlpha:0,holdBeta:0});
+assert.deepEqual(beforeReturn.timeConstants().loss, {status:'reached', timeMS:.5});
 console.log('已验证宋博组表 II 系数、式 (2) 与 (3)、真实轨迹的阱内计数及双体衰减。');
