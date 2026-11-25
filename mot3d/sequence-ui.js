@@ -10,6 +10,12 @@ const phases = [
   { keys: ['compressMS', 'compressMHz', 'finalGradient', 'finalObliqueUW', 'finalHorizontalUW', 'powerRamp'],
     note: '压缩开始时切换绿光失谐。斜光和水平光各自按所选曲线降至末端功率，主轴梯度线性变化。' },
 ];
+const bluePhases = [
+  { keys:['loadMS', 'blueDetuningMHz', 'loadGradient', 'blueObliqueMW', 'blueHorizontalMW'],
+    note:'原子束进入 399 nm MOT 连续装载。蓝光的功率、失谐和磁场梯度在两个阶段保持相同。' },
+  { keys:['holdMS'],
+    note:'关闭入射原子束，保持 399 nm 囚禁光和磁场，观察蓝 MOT 中的原子数衰减。' },
+];
 const channels = [
   { label: '399 nm 光闸', tone: 'blue', value: s => Number(s.blueOn), gate: true },
   { label: '399 nm 总功率', tone: 'blue', value: s => sum(s.bluePowersMW), unit: 'mW', base: 0 },
@@ -18,6 +24,7 @@ const channels = [
   { label: '556 nm 总功率', tone: 'green', value: s => sum(s.greenPowersMW), unit: 'mW', base: 0 },
   { label: '556 nm 失谐', tone: 'green', value: s => s.greenDetuningMHz, unit: 'MHz' },
   { label: '主轴梯度', tone: 'field', value: s => s.gradientGCM, unit: 'G/cm' },
+  { label: '入射原子束', tone: 'source', value: s => Number(s.stageId === 'load'), gate: true },
 ];
 const sum = a => a.reduce((x, y) => x + y, 0);
 const number = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 3, useGrouping: false });
@@ -97,7 +104,7 @@ export function mountSequenceEditor(host, { initialPreset = SEQUENCE_PRESETS[0],
     return state.stageIndex + fraction;
   }
   function playbackTime(position) {
-    const i = Math.min(3, Math.floor(position)), stage = program.stages[i];
+    const i = Math.min(program.stages.length - 1, Math.floor(position)), stage = program.stages[i];
     const fraction = position - i;
     if (i === 0 && stage.durationMS > 40)
       return fraction <= .5 ? 40 * fraction : 20 + (fraction - .5) * 2 * (stage.durationMS - 20);
@@ -199,11 +206,12 @@ export function mountSequenceEditor(host, { initialPreset = SEQUENCE_PRESETS[0],
   }
   function makeFields() {
     const phase = program.stages[activePhase];
+    const definitions = program.config.mode === 'blue-only' ? bluePhases : phases;
     phaseButtons.forEach((b, i) => b.setAttribute('aria-pressed', String(i === activePhase)));
     title.textContent = phase.label + '参数';
-    note.textContent = phases[activePhase].note;
+    note.textContent = definitions[activePhase].note;
     form.replaceChildren();
-    for (const key of phases[activePhase].keys) {
+    for (const key of definitions[activePhase].keys) {
       const label = element('label', 'seq-field');
       if (key === 'powerRamp') {
         label.append(element('span', '', '绿光功率斜坡'));
@@ -214,7 +222,8 @@ export function mountSequenceEditor(host, { initialPreset = SEQUENCE_PRESETS[0],
         }
         input.value = program.config[key]; label.append(input);
       } else {
-        const [name, unit, min, max] = SEQUENCE_FIELDS[key];
+        const [defaultName, unit, min, max] = SEQUENCE_FIELDS[key];
+        const name = key === 'loadMS' && program.config.mode === 'blue-only' ? '纯蓝装载时间' : defaultName;
         label.append(element('span', '', name));
         const wrap = element('span', 'seq-unit-field'), input = element('input');
         input.type = 'number'; input.step = 'any'; input.min = min; input.max = max;
@@ -230,14 +239,26 @@ export function mountSequenceEditor(host, { initialPreset = SEQUENCE_PRESETS[0],
     program.stages.forEach((s, i) => { phaseButtons[i].lastElementChild.textContent = seconds(s.durationMS); });
     const s = program.stages[activePhase];
     span.textContent = fmt(s.startMS) + ' – ' + fmt(s.endMS) + ' ms';
-    host.querySelectorAll('[data-gate]').forEach(input => { input.checked = program.config[input.dataset.gate]; });
+    const blueOnly = program.config.mode === 'blue-only';
+    host.classList.toggle('seq-blue-only', blueOnly);
+    host.querySelectorAll('[data-gate]').forEach(input => {
+      input.checked = program.config[input.dataset.gate];
+      input.disabled = blueOnly && input.dataset.gate === 'greenEnabled';
+    });
   }
   function applyConfig(config, redrawFields) {
     const previous = sequenceAt(program, timeMS);
     const localFraction = previous.elapsedMS / program.stages[previous.stageIndex].durationMS;
+    const oldMode = program.config.mode;
     program = compileSequence(config);
-    const stage = program.stages[previous.stageIndex];
-    const nextTime = stage.startMS + localFraction * stage.durationMS;
+    let nextTime = 0;
+    if (oldMode !== program.config.mode) {
+      activePhase = 0;
+      makePhaseButtons();
+    } else {
+      const stage = program.stages[previous.stageIndex];
+      nextTime = stage.startMS + localFraction * stage.durationMS;
+    }
     pause(); valid = true; error.textContent = '';
     if (redrawFields) makeFields();
     refreshLabels(); drawTraces(); applyAvailability();
@@ -251,7 +272,8 @@ export function mountSequenceEditor(host, { initialPreset = SEQUENCE_PRESETS[0],
       if (input.tagName === 'SELECT') config[key] = input.value;
       else {
         if (!input.validity.valid) {
-          const [name, unit, min, max] = SEQUENCE_FIELDS[key];
+          const [, unit, min, max] = SEQUENCE_FIELDS[key];
+          const name = input.closest('label').firstElementChild.textContent;
           throw new RangeError(name + '须在 ' + min + ' 至 ' + max + ' ' + unit + ' 之间。');
         }
         config[key] = input.valueAsNumber;
@@ -297,15 +319,23 @@ export function mountSequenceEditor(host, { initialPreset = SEQUENCE_PRESETS[0],
   listen(chart, 'pointermove', event => {
     if (enabled && valid && chart.hasPointerCapture(event.pointerId)) seekAtPointer(event);
   });
-  program.stages.forEach((s, i) => {
-    const button = element('button', 'seq-phase');
-    button.type = 'button'; button.dataset.stage = s.id;
-    button.append(element('span', '', s.label), element('small', '', seconds(s.durationMS)));
-    listen(button, 'click', () => {
-      if (!valid) { form.querySelector(':invalid')?.focus(); return; }
-      activePhase = i; makeFields(); refreshLabels(); pause(); setTime(program.stages[i].startMS);
-    });
-    phaseButtons.push(button); get('.seq-phase-controls').append(button);
+  function makePhaseButtons() {
+    phaseButtons.length = 0;
+    for (const s of program.stages) {
+      const button = element('button', 'seq-phase');
+      button.type = 'button'; button.dataset.stage = s.id;
+      button.append(element('span', '', s.label), element('small', '', seconds(s.durationMS)));
+      phaseButtons.push(button);
+    }
+    get('.seq-phase-controls').replaceChildren(...phaseButtons);
+  }
+  makePhaseButtons();
+  listen(get('.seq-phase-controls'), 'click', event => {
+    const button = event.target.closest('button[data-stage]');
+    if (!button) return;
+    if (!valid) { form.querySelector(':invalid')?.focus(); return; }
+    activePhase = phaseButtons.indexOf(button);
+    makeFields(); refreshLabels(); pause(); setTime(program.stages[activePhase].startMS);
   });
   listen(form, 'input', () => handleEdit(false));
   listen(form, 'change', () => handleEdit(true));
@@ -342,7 +372,7 @@ export function mountSequenceEditor(host, { initialPreset = SEQUENCE_PRESETS[0],
     setTime, pause, setImagingGate,
     setEnabled(value) { enabled = Boolean(value); if (!enabled) pause(); applyAvailability(); },
     replace(config, {presetId, name = '导入时序'} = {}) {
-      activePreset = SEQUENCE_PRESETS.find(preset => preset.id === presetId) ?? matchingSequencePreset(config);
+      activePreset = SEQUENCE_PRESETS.find(preset => preset.id === presetId && preset.config.mode === config.mode) ?? matchingSequencePreset(config);
       presetSelect.querySelector('option[value="imported"]')?.remove();
       importedPreset = null;
       if (!activePreset) {

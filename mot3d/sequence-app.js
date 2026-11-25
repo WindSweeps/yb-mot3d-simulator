@@ -17,6 +17,7 @@ const fields = Array.from(form.elements);
 const loadingForm = $('#seq-loading-inputs');
 const loadingFields = Array.from(loadingForm.elements);
 const lossRows = Array.from(loadingForm.querySelectorAll('[data-loss-stage]'));
+const checkpointButtons = Array.from(document.querySelectorAll('[data-checkpoint]'));
 const formatId = 'yb-mot-sequence-v1';
 const blank = '—';
 const maxFileBytes = 256000;
@@ -33,6 +34,7 @@ const initialPreset = SEQUENCE_PRESETS.find(preset => preset.id === requestedPre
 let params = await initialInputs(), program = compileSequence(initialPreset.config), timeMS = 0;
 let geometry = derive(params);
 let loading = { flux:params.incidentFlux ?? DEFAULT_FLUX };
+const loadingByMode = new Map();
 let worker = null, timer = 0, job = 0, result = null, scene = null, population = null;
 let editValid = true, suspended = false, started = 0;
 
@@ -41,15 +43,19 @@ async function initialInputs() {
   try { previous = JSON.parse(sessionStorage.getItem('yb-mot3d-sequence-inputs')) || {}; }
   catch { previous = {}; }
   const base = { ...DEFAULTS, ...previous };
-  // 双色序列单独设置采样数；实验文件导入时使用文件中明确保存的数量。
+  // 时序页单独设置采样数；实验文件导入时使用文件中明确保存的数量。
   const adapter = await navigator.gpu?.requestAdapter().catch(() => null);
   const n = adapter ? (matchMedia('(max-width: 800px)').matches ? 4096 : 16384) : 1024;
   return { ...base, n, greenWaistMM: base.waistMM };
 }
 
+function fillLoadingInputs() {
+  for (const field of loadingFields) field.value = loading[field.name] ?? '';
+}
+
 function fillInputs() {
   for (const field of fields) field.value = String(params[field.name]);
-  for (const field of loadingFields) field.value = loading[field.name] ?? '';
+  fillLoadingInputs();
   const bias = params.biasCurrentA.map((value, i) => +(value * params.biasPerAmp[i]).toFixed(3));
   $('#sequence-geometry').textContent = '冷束沿 +X 入射，两组斜光在 XZ 平面内夹 120°。主轴 ' +
     params.mainAxis.toUpperCase() + '，偏置场 (X, Y, Z) = (' + bias.join(', ') + ') G。重力' +
@@ -60,12 +66,26 @@ function showReferenceLoss() {
   const labels = {blue:'蓝光', green:'绿光', twoColor:'双色光', dark:'无光'};
   const stages = sequenceLossStages(program);
   for (const row of lossRows) {
-    const stage = stages[Number(row.dataset.lossStage)];
-    row.querySelector('small').textContent = labels[stage.light];
+    const stage = stages.find(s => s.id === row.dataset.lossStage);
     const [alpha, beta] = row.querySelectorAll('input');
+    row.hidden = !stage;
+    alpha.disabled = beta.disabled = !stage;
+    if (!stage) continue;
+    row.querySelector('small').textContent = labels[stage.light];
     alpha.placeholder = String(stage.alpha);
     beta.placeholder = String(stage.beta);
   }
+  const blueOnly = program.config.mode === 'blue-only';
+  const heading = blueOnly ? '纯蓝 MOT 实验时序' : '双色 MOT 实验时序';
+  $('#sequence-heading').textContent = heading;
+  document.title = 'Yb · ' + heading;
+  $('#sequence-wavelengths').textContent = blueOnly ? '¹⁷⁴Yb · 399 nm' : '¹⁷⁴Yb · 399 nm / 556 nm';
+  checkpointButtons[1].textContent = blueOnly ? '保持中点 N₁' : '纯绿接收 N₁';
+  checkpointButtons[2].textContent = blueOnly ? '保持结束 N₂' : '压缩结束 N₂';
+  $('#seq-total-label').textContent = blueOnly ? '保持留存 N₂ / N₀' : '转移和压缩合计 N₂ / N₀';
+  $('#seq-transfer-reference').hidden = $('#seq-loading-reference').hidden = blueOnly;
+  form.elements.greenWaistMM.disabled = blueOnly;
+  form.elements.greenWaistMM.closest('label').hidden = blueOnly;
 }
 
 function stageAt(t) {
@@ -195,6 +215,11 @@ const editor = mountSequenceEditor($('#sequence-editor'), {
   onTime:showFrame,
   onChange(config, compiled) {
     editValid = true;
+    if (!suspended && program.config.mode !== compiled.config.mode) {
+      loadingByMode.set(program.config.mode, loading);
+      loading = {...loadingByMode.get(compiled.config.mode), flux:loading.flux};
+      fillLoadingInputs();
+    }
     program = compiled;
     if (!suspended) recalculate();
   },
@@ -240,12 +265,12 @@ function recalculate() {
     status('请完成有效的时序与模拟参数。');
     return;
   }
-  for (const field of fields) params[field.name] = Number(field.value);
+  for (const field of fields) if (!field.disabled) params[field.name] = Number(field.value);
   geometry = derive(params);
   scene?.setParams(params, geometry);
   showFrame(timeMS);
   $('#sequence-export').disabled = !loadingForm.checkValidity() || !imaging.isValid();
-  status('正在积分双色光力与绿 MOT 轨迹…');
+  status('正在积分 MOT 光力与原子轨迹…');
   const id = job;
   timer = setTimeout(() => {
     started = performance.now();
@@ -296,7 +321,8 @@ function initializeScene() {
 $('#sequence-export').addEventListener('click', () => {
   const preset = editor.getPreset();
   const file = { format:formatId, presetId:preset.id, presetName:preset.name, config:editor.getConfig(),
-    params, loading, imaging:imaging.getSettings(), summary:result?.summary ?? null };
+    params, loading:Object.fromEntries(loadingFields.filter(field => !field.disabled && field.name in loading)
+      .map(field => [field.name, loading[field.name]])), imaging:imaging.getSettings(), summary:result?.summary ?? null };
   if (result) file.samplingDiagnostics = result.samplingDiagnostics;
   if (population) {
     file.estimatedAtoms = population.estimatedAtoms;
@@ -335,6 +361,7 @@ $('#sequence-file').addEventListener('change', async event => {
     }
     const cameraSettings = validateImagingSettings(data.imaging);
     suspended = true;
+    loadingByMode.set(program.config.mode, loading);
     params = imported; loading = { ...importedLoading }; fillInputs();
     imaging.setSettings(cameraSettings);
     editor.replace(compiled.config, {
@@ -356,14 +383,18 @@ for (const button of document.querySelectorAll('[data-seq-view]')) button.addEve
 for (const layer of document.querySelectorAll('[data-seq-layer]')) layer.addEventListener('change', updateLayers);
 form.addEventListener('input', recalculate);
 $('#sequence-sample-count').addEventListener('input', recalculate);
-for (const button of document.querySelectorAll('[data-checkpoint]')) button.addEventListener('click', () => {
+for (const [index, button] of checkpointButtons.entries()) button.addEventListener('click', () => {
   editor.pause();
-  editor.setTime(program.stages[Number(button.dataset.checkpoint)].endMS);
+  editor.setTime(program.checkpointTimesMS[index]);
 });
 form.addEventListener('submit', event => event.preventDefault());
 loadingForm.addEventListener('input', () => {
   if (loadingForm.checkValidity()) {
-    loading = Object.fromEntries(loadingFields.filter(field => field.value !== '').map(field => [field.name, field.valueAsNumber]));
+    for (const field of loadingFields) {
+      if (field.disabled) continue;
+      if (field.value === '') delete loading[field.name];
+      else loading[field.name] = field.valueAsNumber;
+    }
   }
   summarize();
   $('#sequence-export').disabled = !form.checkValidity() || !editValid || !loadingForm.checkValidity() || !imaging.isValid();

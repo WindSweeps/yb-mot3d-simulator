@@ -87,7 +87,7 @@ export function mountImagingPanel(host, { onSettingsChange, onValidityChange, on
           <div class="si-reading"><span>图像峰值</span><output id="seq-imaging-value"></output></div>
           <div class="si-reading"><span class="si-total-label"></span><output id="seq-imaging-total"></output></div>
           <p class="si-frame-help"></p><p class="si-size"></p>
-          <button type="button" class="small-button si-final" id="seq-imaging-final" hidden>查看压缩末态</button>
+          <button type="button" class="small-button si-final" id="seq-imaging-final" hidden>查看时序末态</button>
         </div>
       </div>
       <details class="si-settings"><summary>曝光与成像参数</summary><div class="si-fields"></div><p class="si-assumptions"></p></details>

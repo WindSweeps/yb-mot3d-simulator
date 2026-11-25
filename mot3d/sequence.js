@@ -1,13 +1,18 @@
-// 四个阶段共享同一物理时钟。单位与时序编辑器一致：ms、MHz、mW、G/cm。
+// 所有通道共享同一物理时钟。单位与时序编辑器一致：ms、MHz、mW、G/cm。
 export const SEQUENCE_STAGES = Object.freeze([
   { id: 'load', label: '双色装载' },
   { id: 'handoff', label: '交接' },
   { id: 'green', label: '纯绿接收' },
   { id: 'compress', label: '绿光压缩' },
 ]);
+const BLUE_STAGES = [
+  { id:'load', label:'纯蓝装载' },
+  { id:'hold', label:'纯蓝保持' },
+];
 
 export const SEQUENCE_FIELDS = Object.freeze({
   loadMS: ['双色装载时间', 'ms', .1, 60000],
+  holdMS: ['关源保持时间', 'ms', .01, 1000],
   handoffMS: ['蓝光关断时间', 'ms', .01, 10],
   greenMS: ['纯绿接收时间', 'ms', .01, 100],
   compressMS: ['压缩时间', 'ms', .01, 300],
@@ -37,6 +42,14 @@ export function songSequence() {
   };
 }
 
+export function blueSequence() {
+  return {
+    mode:'blue-only', loadMS:5000, holdMS:100,
+    blueObliqueMW:15.5, blueHorizontalMW:8, blueDetuningMHz:-34.92, loadGradient:24,
+    blueEnabled:true, greenEnabled:false,
+  };
+}
+
 export const SEQUENCE_PRESETS = Object.freeze([
   Object.freeze({
     id: 'arxiv-2503.24383v2', name: 'arXiv:2503.24383v2',
@@ -48,32 +61,42 @@ export const SEQUENCE_PRESETS = Object.freeze([
       receiveMHz: -3.15, compressMHz: -0.54, receiveGradient: 2.3, finalGradient: 13.2,
       finalObliqueUW: 18.1, finalHorizontalUW: 17.9, powerRamp: 'geometric' }),
   }),
+  Object.freeze({
+    id:'blue-mot-399nm', name:'纯蓝 MOT（399 nm）', config:Object.freeze(blueSequence()),
+  }),
 ]);
 
 export function matchingSequencePreset(config) {
   return SEQUENCE_PRESETS.find(preset =>
-    Object.entries(preset.config).every(([key, value]) => config[key] === value));
+    preset.config.mode === config.mode && Object.entries(preset.config).every(([key, value]) => config[key] === value));
 }
 
 export function compileSequence(input) {
   const config = { ...input };
-  for (const [key, [label, unit, min, max]] of Object.entries(SEQUENCE_FIELDS)) {
+  const blueOnly = config.mode === 'blue-only';
+  if (config.mode !== undefined && !blueOnly) throw new RangeError('未知时序模式。');
+  const keys = blueOnly ? ['loadMS','holdMS','blueObliqueMW','blueHorizontalMW','blueDetuningMHz','loadGradient']
+    : Object.keys(SEQUENCE_FIELDS).filter(key => key !== 'holdMS');
+  for (const key of keys) {
+    const [label, unit, min, max] = SEQUENCE_FIELDS[key];
     if (!Number.isFinite(config[key]) || config[key] < min || config[key] > max)
       throw new RangeError(`${label}须在 ${min} 至 ${max} ${unit} 之间。`);
   }
   for (const key of ['blueEnabled', 'greenEnabled'])
     if (typeof config[key] !== 'boolean') throw new TypeError('光路开关需要布尔值。');
-  if (!['linear', 'smooth', 'geometric'].includes(config.powerRamp)) throw new RangeError('未知绿光功率曲线。');
-  if (config.powerRamp === 'geometric' &&
+  if (blueOnly && config.greenEnabled) throw new RangeError('纯蓝时序需要关闭 556 nm 光路。');
+  if (!blueOnly && !['linear', 'smooth', 'geometric'].includes(config.powerRamp)) throw new RangeError('未知绿光功率曲线。');
+  if (!blueOnly && config.powerRamp === 'geometric' &&
       [config.greenObliqueMW, config.greenHorizontalMW, config.finalObliqueUW, config.finalHorizontalUW].some(p => p <= 0))
     throw new RangeError('使用等比功率斜坡时，起点和终点的各束绿光功率需要大于零。');
   let time = 0;
-  const stages = SEQUENCE_STAGES.map(({ id, label }) => {
+  const stages = (blueOnly ? BLUE_STAGES : SEQUENCE_STAGES).map(({ id, label }) => {
     const durationMS = config[id + 'MS'], startMS = time;
     time += durationMS;
     return { id, label, startMS, endMS: time, durationMS };
   });
-  return { config, stages, durationMS: time };
+  const midpoint = blueOnly ? stages[1].startMS + stages[1].durationMS/2 : stages[2].endMS;
+  return { config, stages, durationMS: time, checkpointTimesMS: [stages[0].endMS, midpoint, time] };
 }
 
 function sixBeams(oblique, horizontal) {
@@ -95,6 +118,12 @@ export function sequenceAt(program, timeMS) {
   const stageIndex = index < 0 ? program.stages.length - 1 : index;
   const stage = program.stages[stageIndex], c = program.config;
   const elapsedMS = t - stage.startMS;
+  if (c.mode === 'blue-only') {
+    return { stageIndex, stageId:stage.id, elapsedMS, timeMS:t, blueOn:c.blueEnabled, greenOn:false,
+      bluePowersMW:sixBeams(c.blueEnabled ? c.blueObliqueMW : 0, c.blueEnabled ? c.blueHorizontalMW : 0),
+      greenPowersMW:sixBeams(0, 0), blueDetuningMHz:c.blueDetuningMHz, greenDetuningMHz:0,
+      gradientGCM:c.loadGradient };
+  }
   const u = t === stage.endMS ? 1 : Math.min(1, Math.max(0, elapsedMS / stage.durationMS));
   const blueOn = c.blueEnabled && stageIndex <= 1;
   const greenOn = c.greenEnabled;

@@ -115,5 +115,5 @@ export function sequencePopulation(program, result, settings) {
     if (timeMS < load.endMS) return loadPopulation(timeMS, flux, p, load.alpha, load.beta);
     return weightAt(timeMS, trapped) * trapped;
   }
-  return {at, weightAt, loaded, estimatedAtoms: {N0:loaded, N1:at(stages[2].endMS, N1), N2:finalWeight * N2}};
+  return {at, weightAt, loaded, estimatedAtoms: {N0:loaded, N1:at(program.checkpointTimesMS[1], N1), N2:finalWeight * N2}};
 }
