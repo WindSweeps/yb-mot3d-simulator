@@ -12,7 +12,7 @@ const BLUE_STAGES = [
 
 export const SEQUENCE_FIELDS = Object.freeze({
   loadMS: ['双色装载时间', 'ms', .1, 60000],
-  holdMS: ['关源保持时间', 'ms', .01, 1000],
+  holdMS: ['关源保持时间', 'ms', .01, Infinity],
   handoffMS: ['蓝光关断时间', 'ms', .01, 10],
   greenMS: ['纯绿接收时间', 'ms', .01, 100],
   compressMS: ['压缩时间', 'ms', .01, 300],
@@ -87,8 +87,10 @@ export function compileSequence(input) {
   const blueOnly = config.mode === 'blue-only';
   if (config.mode !== undefined && !blueOnly) throw new RangeError('未知时序模式。');
   for (const [key, [label, unit, min, max]] of Object.entries(sequenceFieldsFor(config))) {
-    if (!Number.isFinite(config[key]) || config[key] < min || config[key] > max)
+    if (!Number.isFinite(config[key]) || config[key] < min || config[key] > max) {
+      if (!Number.isFinite(max)) throw new RangeError(`${label}须为至少 ${min} ${unit} 的有限数值。`);
       throw new RangeError(`${label}须在 ${min} 至 ${max} ${unit} 之间。`);
+    }
   }
   for (const key of ['blueEnabled', 'greenEnabled'])
     if (typeof config[key] !== 'boolean') throw new TypeError('光路开关需要布尔值。');

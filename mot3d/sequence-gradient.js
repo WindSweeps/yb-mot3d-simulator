@@ -71,8 +71,9 @@ export async function optimizeSequence({
       let low = 0, high = 0;
       const feasible = {...candidate};
       durationAxes.forEach(({key, max}, i) => {
-        feasible[key] = max;
-        high = Math.max(high, (max - candidate[key]) / weights[i]);
+        // 投影只需补足目标时刻；即使阶段没有时长上限，也有有限的二分端点。
+        feasible[key] = Math.min(max, Math.max(candidate[key], timeMS));
+        high = Math.max(high, (feasible[key] - candidate[key]) / weights[i]);
       });
       const trial = {...candidate};
       for (let j = 0; j < 64; j++) {
@@ -132,8 +133,10 @@ export async function optimizeSequence({
     }
     if (state.bestValue !== baseValue) stalled = 0;
     else {
+      // 单侧有界的变量在覆盖有限侧及当前尺度后结束无改善的扩展。
       const coversBounds = axes.every(({key, min, max, positive}, i) =>
-        radius * scales[i] / 4 >= Math.max(positive ? 20 * base[key] : base[key] - min, max - base[key]));
+        radius * scales[i] / 4 >= Math.max(positive ? 20 * base[key] : base[key] - min,
+          Number.isFinite(max) ? max - base[key] : scales[i]));
       if (stalled >= localRadii.length && coversBounds) break;
       stalled++;
     }

@@ -3,6 +3,7 @@ import { sequenceAt } from './sequence.js';
 import { prepareSequenceRun, writeSequenceGPUFrames, finishSequenceRun } from './sequence-physics.js';
 
 const atomBytes = 48, frameAtomBytes = 48, planBytes = 64;
+const batchBytes = 24;
 const historyPageBytes = 12 * 1024 * 1024;
 const maxStepsPerDispatch = 96, maxDispatchesPerSubmit = 32, particleStepBudget = 2 * 1024 * 1024;
 const normalizedMHzFactor = 4 * Math.PI * 1e6;
@@ -41,28 +42,28 @@ function packAtoms({model,initial}) {
   return buffer;
 }
 
-function packFrames({model,field,program,grid}) {
-  const endSteps = new Uint32Array(grid.length);
+function packFrames({field,program,grid}) {
+  const firstHeld = new Float64Array(grid.length);
   const buffer = new ArrayBuffer(planBytes*grid.length);
   const flags = new Uint32Array(buffer), values = new Float32Array(buffer);
   for (let f=0; f<grid.length; f++) {
     const point = grid[f], start = grid[Math.max(0,f-1)].time;
     const delta = point.time-start, stageIndex = sequenceAt(program,start).stageIndex, stage = program.stages[stageIndex];
-    const steps = f===0 || point.freeze ? 0 : Math.max(1,Math.ceil(delta*1000/Math.min(5,model.params.dtUS)-1e-8));
+    const steps = point.steps;
+    if (!Number.isSafeInteger(steps) || steps < 0) throw new Error('积分步数缺失或无效，请刷新网页后重新计算。');
     const stepMS = steps ? delta/steps : 0;
-    const firstHeld = steps ? Math.max(0,Math.min(steps+1,Math.ceil((point.windowStart-start-1e-12)/stepMS))) : 1;
+    firstHeld[f] = steps ? Math.max(0,Math.min(steps+1,Math.ceil((point.windowStart-start-1e-12)/stepMS))) : 1;
     const end = sequenceAt(program,point.time), k = f*16;
     // 纯蓝装载和保持使用同一恒定光场；关源时刻只改变原子数方程。
     const opticalStage = stage.id === 'hold' ? 0 : stageIndex;
-    flags.set([opticalStage, steps, firstHeld, Number(Boolean(point.checkpoint))], k);
+    flags.set([opticalStage, Number(Boolean(point.checkpoint))], k);
     values.set([stepMS*.001,(start-stage.startMS)/stage.durationMS,stepMS/stage.durationMS,0,
       field.blue.factor*end.bluePowersMW[0], field.blue.factor*end.bluePowersMW[4],
       field.green.factor*end.greenPowersMW[0], field.green.factor*end.greenPowersMW[4],
       normalizedMHzFactor*end.blueDetuningMHz/field.blue.transition.gamma, normalizedMHzFactor*end.greenDetuningMHz/field.green.transition.gamma,
       end.gradientGCM, 0],k+4);
-    endSteps[f] = steps;
   }
-  return {buffer,endSteps};
+  return {buffer,firstHeld};
 }
 
 async function integrate(device,pipeline,layout,input,config,options) {
@@ -87,25 +88,33 @@ async function integrate(device,pipeline,layout,input,config,options) {
     const pageBytes = pageSize*n*frameAtomBytes;
     const output = allocate('Atomic frame page',pageBytes,storage|GPUBufferUsage.COPY_SRC);
     const readback = allocate('Atomic readback',pageBytes,GPUBufferUsage.MAP_READ|upload);
-    const stride = Math.max(16,device.limits.minUniformBufferOffsetAlignment);
+    const stride = Math.ceil(batchBytes/device.limits.minUniformBufferOffsetAlignment)*device.limits.minUniformBufferOffsetAlignment;
     const argumentsBuffer = new Uint32Array(maxDispatchesPerSubmit*stride/4);
+    const floatArguments = new Float32Array(argumentsBuffer.buffer);
     const commands = allocate('Integration intervals',argumentsBuffer.byteLength,GPUBufferUsage.UNIFORM|upload);
     const group = device.createBindGroup({layout, entries:[
       {binding:0,resource:{buffer:settings}}, {binding:1,resource:{buffer:particles}},
       {binding:2,resource:{buffer:frames}}, {binding:3,resource:{buffer:output}},
-      {binding:4,resource:{buffer:commands,size:16}},
+      {binding:4,resource:{buffer:commands,size:batchBytes}},
     ]});
-    for (let first=0; first<frameCount; first+=pageSize) {
-      const end = Math.min(first+pageSize,frameCount), bytes = (end-first)*n*frameAtomBytes;
+    // 读回装载末帧即可知道是否捕获了原子。所有轨迹均已丢失时，后续只须写出静止的历史帧。
+    const afterCapture = run.grid.findIndex(point => point.checkpoint === 'N0')+1;
+    let liveCount = n;
+    for (let first=0; first<frameCount;) {
+      const end = Math.min(first+pageSize,first<afterCapture ? afterCapture : frameCount), bytes = (end-first)*n*frameAtomBytes;
       let frame = first, step = 0;
       while (frame < end) {
         const encoder = device.createCommandEncoder(), pass = encoder.beginComputePass();
         pass.setPipeline(pipeline);
         let count=0, particleSteps=0;
         while (frame<end && particleSteps<particleStepBudget && count<maxDispatchesPerSubmit) {
-          const total = plan.endSteps[frame], steps = Math.min(total-step,maxStepsPerDispatch);
+          const total = liveCount ? run.grid[frame].steps : 0;
+          const steps = Math.min(total-step,maxStepsPerDispatch);
           const offset = count*stride;
-          argumentsBuffer.set([frame,frame-first,step,steps],offset/4);
+          // 着色器内只使用单次调度的局部步号。总步数和驻留窗口的起点保留 JavaScript 整数精度。
+          const heldFrom = Math.max(0,Math.min(steps+1,plan.firstHeld[frame]-step));
+          argumentsBuffer.set([frame,frame-first,steps,heldFrom,0,Number(step+steps===total)],offset/4);
+          floatArguments[offset/4+4] = step;
           pass.setBindGroup(0,group,[offset]);
           pass.dispatchWorkgroups(Math.ceil(n/32));
           count++;
@@ -119,9 +128,10 @@ async function integrate(device,pipeline,layout,input,config,options) {
         if (frame<end) await device.queue.onSubmittedWorkDone();
       }
       await readback.mapAsync(GPUMapMode.READ,0,bytes);
-      writeSequenceGPUFrames(run,new Float32Array(readback.getMappedRange(0,bytes)),first,end-first);
+      liveCount = writeSequenceGPUFrames(run,new Float32Array(readback.getMappedRange(0,bytes)),first,end-first);
       readback.unmap();
       options.onProgress?.(end/frameCount);
+      first = end;
     }
     return Object.assign(finishSequenceRun(run,start),{backend:'WebGPU'});
   } finally {
@@ -130,6 +140,7 @@ async function integrate(device,pipeline,layout,input,config,options) {
 }
 
 export async function createSequenceGpu(source) {
+  if (source.includes('fn advance(')) throw new Error('网页已更新，请刷新后重新计算。');
   if (!navigator.gpu) return null;
   let adapter;
   try { adapter = await navigator.gpu.requestAdapter(); }
@@ -150,10 +161,10 @@ export async function createSequenceGpu(source) {
       {binding:1, visibility:GPUShaderStage.COMPUTE,buffer:{type:'storage'}},
       {binding:2, visibility:GPUShaderStage.COMPUTE,buffer:{type:'read-only-storage'}},
       {binding:3, visibility:GPUShaderStage.COMPUTE,buffer:{type:'storage'}},
-      {binding:4, visibility:GPUShaderStage.COMPUTE,buffer:{type:'uniform',hasDynamicOffset:true,minBindingSize:16}},
+      {binding:4, visibility:GPUShaderStage.COMPUTE,buffer:{type:'uniform',hasDynamicOffset:true,minBindingSize:batchBytes}},
     ]});
     const pipeline = await device.createComputePipelineAsync({
-      layout:device.createPipelineLayout({bindGroupLayouts:[layout]}),compute:{module:shader,entryPoint:'advance'},
+      layout:device.createPipelineLayout({bindGroupLayouts:[layout]}),compute:{module:shader,entryPoint:'advanceBatch'},
     });
     return {
       async run(input,config,options={}) {

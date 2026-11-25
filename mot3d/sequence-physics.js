@@ -102,7 +102,7 @@ function inside(p, v) {
 function observationGrid(program) {
   const [load, next, green, compress] = program.stages;
   const loadEnd = Math.min(load.endMS, 20);
-  const grid = [{ time: 0 }];
+  const grid = [{ time: 0, steps: 0 }];
   function section(start, end, interval, cap, windowStart, checkpoint) {
     const count = Math.max(1, Math.min(cap, Math.ceil((end-start) / interval)));
     for (let i = 1; i <= count; i++) {
@@ -132,8 +132,11 @@ function atomFrom(initial, i, seed) {
 
 export function prepareSequenceRun(input, config, options = {}) {
   const model = compile(input), field = lightField(model);
-  const { n } = model.params;
-  const program = compileSequence(config), { grid, loadEnd } = observationGrid(program);
+  const { n, dtUS } = model.params;
+  const program = compileSequence(config);
+  if (program.durationMS - Math.min(5, dtUS) / 1000 === program.durationMS)
+    throw new RangeError('时序末端的浮点时间精度已无法分辨积分步长。');
+  const { grid, loadEnd } = observationGrid(program);
   const observeAtMS = options.observeAtMS;
   if (observeAtMS != null) {
     if (!Number.isFinite(observeAtMS) || observeAtMS < 0 || observeAtMS > program.durationMS)
@@ -146,6 +149,11 @@ export function prepareSequenceRun(input, config, options = {}) {
     }
   }
   const initial = options.initialStates ? Float64Array.from(options.initialStates) : sampleInitialStates(model.params);
+  for (let f = 1; f < grid.length; f++) {
+    const point = grid[f], delta = point.time - grid[f-1].time;
+    point.steps = point.freeze ? 0 : Math.max(1, Math.ceil(delta * 1000 / Math.min(5, dtUS) - 1e-8));
+    if (!Number.isSafeInteger(point.steps)) throw new RangeError('观察间隔的积分步数超出可精确表示的整数范围。');
+  }
   if (initial.length !== n*6 || initial.some(x => !Number.isFinite(x))) throw new RangeError('时序初始相空间尺寸或数值无效。');
   const samples = n * grid.length;
   const result = {
@@ -237,6 +245,7 @@ export function writeSequenceGPUFrames(run, data, firstFrame, frameCount) {
   if (firstFrame !== result.metrics.length || !Number.isInteger(frameCount) || frameCount < 1 ||
       firstFrame + frameCount > result.frameCount ||
       data.length < 12 * result.n * frameCount) throw new RangeError('GPU 返回的时序帧范围或长度无效。');
+  let liveCount;
   for (let f = firstFrame; f < firstFrame + frameCount; f++) {
     const m = frameMoments();
     for (let i = 0; i < result.n; i++) {
@@ -249,7 +258,9 @@ export function writeSequenceGPUFrames(run, data, firstFrame, frameCount) {
       writeAtom(result, f*result.n + i, data, offset, data, offset+4, live, trapped, blueRate, greenRate, m);
     }
     finishFrame(run, f, m);
+    liveCount = m.live;
   }
+  return liveCount;
 }
 
 export function finishSequenceRun(run, started) {
@@ -261,10 +272,12 @@ export function finishSequenceRun(run, started) {
 export function simulateSequence(input, config, options = {}) {
   const start = performance.now(), run = prepareSequenceRun(input,config,options);
   const {model, program, grid, initial, result} = run;
-  const {n, seed, dtUS} = model.params;
+  const {n, seed} = model.params;
   const atoms = Array.from({ length:n }, (_, i) => atomFrom(initial, i, seed));
   const first = run.field, middle = lightField(model), s = scratch();
   const hp = new Float64Array(3), hv = new Float64Array(3);
+  const constantLight = program.config.mode === 'blue-only';
+  if (constantLight) configure(middle, sequenceAt(program, 0));
 
   function frame(f) {
     configure(first, sequenceAt(program, grid[f].time));
@@ -276,15 +289,19 @@ export function simulateSequence(input, config, options = {}) {
     }
     finishFrame(run,f,m);
   }
-  function propagate(t, end, windowStart) {
+  function propagate(t, {time:end, windowStart, steps}) {
+    const survivors = atoms.filter(atom => atom.live);
+    let liveCount = survivors.length;
+    if (liveCount === 0) return;
     // 物理单位在积分核内为 SI。在阶段边界结束当前步，避免突跳被时间平均。
-    const steps = Math.max(1, Math.ceil((end-t) * 1000 / Math.min(5,dtUS) - 1e-8));
     const h = (end-t)/steps, dt = h * .001;
     for (let step = 0; step < steps; step++) {
       const now = t + step*h;
-      configure(first, sequenceAt(program, now));
-      configure(middle, sequenceAt(program, now+.5*h));
-      for (const atom of atoms) {
+      if (!constantLight) {
+        configure(first, sequenceAt(program, now));
+        configure(middle, sequenceAt(program, now+.5*h));
+      }
+      for (const atom of survivors) {
         if (!atom.live) continue;
         const {p,v} = atom;
         if (now >= windowStart - 1e-12 && !inside(p,v)) atom.held = false;
@@ -294,7 +311,10 @@ export function simulateSequence(input, config, options = {}) {
         for (let a=0; a<3; a++) { p[a] += dt*hv[a]; v[a] += dt*s.acceleration[a]; }
         if (model.params.recoil) recoil(v, dt, s, atom.rng);
         if (!Number.isFinite(p[0]+p[1]+p[2]+v[0]+v[1]+v[2])) throw new Error('时序积分出现非有限相空间。');
-        if (p[0]*p[0]+p[1]*p[1]+p[2]*p[2] > domain*domain) atom.live = false;
+        if (p[0]*p[0]+p[1]*p[1]+p[2]*p[2] > domain*domain) {
+          atom.live = false;
+          if (--liveCount === 0) return;
+        }
         if (now+h >= windowStart - 1e-12 && !inside(p,v)) atom.held = false;
       }
     }
@@ -303,7 +323,7 @@ export function simulateSequence(input, config, options = {}) {
   frame(0);
   for (let f = 1; f < grid.length; f++) {
     const point = grid[f];
-    if (!point.freeze) propagate(grid[f-1].time, point.time, point.windowStart);
+    if (!point.freeze) propagate(grid[f-1].time, point);
     if (point.checkpoint) {
       for (const atom of atoms) {
         atom.live = atom.live && atom.held;

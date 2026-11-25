@@ -181,13 +181,17 @@ struct Atom {
   rng: u32, pad0: u32, pad1: vec2u,
 }
 struct FramePlan {
-  flags: vec4u,           // 起点阶段、总步数、开始要求持续留存的步号、阶段末筛选
+  flags: vec4u,           // 起点光场阶段、帧末留存筛选
   step: vec4f,            // dt 秒、起点在阶段的相对位置、每步的相对长度
   endPeaks: vec4f,
   endFields: vec4f,       // 两色帧末失谐和帧末梯度，含阶段边沿突变
 }
 struct OutputSample {
   positionLive: vec4f, velocityTrapped: vec4f, rates: vec4f,
+}
+struct Batch {
+  frame: u32, pageFrame: u32, steps: u32, heldFrom: u32,
+  offsetInFrame: f32, finishFrame: u32,
 }
 struct Channels { peak: vec4f, detuning: vec2f, gradient: f32 }
 struct LineRates { positive: vec3f, negative: vec3f }
@@ -199,7 +203,7 @@ struct Radiation {
 @group(0) @binding(1) var<storage,read_write> particles: array<Atom>;
 @group(0) @binding(2) var<storage,read> plans: array<FramePlan>;
 @group(0) @binding(3) var<storage,read_write> history: array<OutputSample>;
-@group(0) @binding(4) var<uniform> batch: vec4u; // 当前帧、页内帧位置、起点步号、本次积分步数
+@group(0) @binding(4) var<uniform> batch: Batch;
 
 fn channels(stage: u32, fraction: f32) -> Channels {
   let u = clamp(fraction, 0.0, 1.0);
@@ -315,37 +319,36 @@ fn inside(pos: vec3f, vel: vec3f) -> bool {
 }
 
 @compute @workgroup_size(32)
-fn advance(@builtin(global_invocation_id) invocation: vec3u) {
+fn advanceBatch(@builtin(global_invocation_id) invocation: vec3u) {
   let id = invocation.x;
   let n = arrayLength(&particles);
   if (id >= n) { return; }
-  let plan = plans[batch.x];
-  let endStep = batch.z+batch.w;
+  let plan = plans[batch.frame];
   let a = lab.axes;
   let axes = mat3x3f(a[0].xyz,a[1].xyz,a[2].xyz);
   let helicity = vec3f(a[0].w,a[1].w,a[2].w);
   var p = particles[id];
   let dt = plan.step.x;
-  for (var step=batch.z; step<endStep && p.live!=0u; step++) {
-    if (step>=plan.flags.z && !inside(p.pos,p.vel)) { p.held=0u; }
-    let u = plan.step.y+f32(step)*plan.step.z;
+  for (var step=0u; step<batch.steps && p.live!=0u; step++) {
+    if (step>=batch.heldFrom && !inside(p.pos,p.vel)) { p.held=0u; }
+    let u = plan.step.y+(batch.offsetInFrame+f32(step))*plan.step.z;
     let start = radiation(p.pos,p.vel,channels(plan.flags.x,u),axes,helicity);
     let midPos = p.pos+0.5*dt*p.vel; let midVel = p.vel+0.5*dt*start.acc;
     let mid = radiation(midPos,midVel,channels(plan.flags.x,u+0.5*plan.step.z),axes,helicity);
     p.pos += dt*midVel; p.vel += dt*mid.acc;
     if (lab.biasRecoil.w!=0.0) { p.vel += recoilKick(mid,dt,axes,&p.rng); }
     if (dot(p.pos,p.pos)>0.15*0.15) { p.live=0u; }
-    if (step+1u>=plan.flags.z && !inside(p.pos,p.vel)) { p.held=0u; }
+    if (step+1u>=batch.heldFrom && !inside(p.pos,p.vel)) { p.held=0u; }
   }
-  if (endStep==plan.flags.y) {
-    if (plan.flags.w!=0u) { p.live &= p.held; p.held=1u; }
+  if (batch.finishFrame!=0u) {
+    if (plan.flags.y!=0u) { p.live &= p.held; p.held=1u; }
     var rates = vec2f(0.0);
     if (p.live!=0u) {
       let end = Channels(plan.endPeaks,plan.endFields.xy,plan.endFields.z);
       let r = radiation(p.pos,p.vel,end,axes,helicity);
       rates = vec2f(r.blueTotal,r.greenTotal);
     }
-    history[batch.y*n+id] = OutputSample(vec4f(p.pos,f32(p.live)),
+    history[batch.pageFrame*n+id] = OutputSample(vec4f(p.pos,f32(p.live)),
       vec4f(p.vel,f32(p.live!=0u && inside(p.pos,p.vel))),vec4f(rates,0.0,0.0));
   }
   particles[id] = p;

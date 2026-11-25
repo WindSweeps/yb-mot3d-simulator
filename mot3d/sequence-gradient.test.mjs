@@ -126,6 +126,20 @@ test('仅允许优化当前时序模式的变量', async () => {
     evaluate:temperatureAtLoad}), RangeError);
 });
 
+test('纯蓝保持时间无上限时仍可在固定观察时刻联合优化装载与保持', async () => {
+  const sequence = {...blueSequence(), loadMS:1, holdMS:1};
+  const timeMS = 2;
+  const scorer = await createCandidateScorer({params:apparatus, loading:{flux:1e7}, timeMS, metric:'atoms'});
+  const outcome = await optimizeSequence({config:sequence, timeMS, variables:['loadMS','holdMS'],
+    direction:'min', maxEvaluations:10, async evaluate(candidate) {
+      assert.ok(Number.isFinite(candidate.holdMS) && compileSequence(candidate).durationMS >= timeMS);
+      return (await scorer.evaluate(candidate)).value;
+    }});
+  scorer.destroy();
+  assert.ok(outcome.bestValue < outcome.baseline);
+  assert.ok(outcome.bestConfig.loadMS < 1 && outcome.bestConfig.holdMS > 1);
+});
+
 test('等比斜坡的功率搜索可越过半功率并始终严格为正', async () => {
   const sequence = {...config, powerRamp:'geometric', finalHorizontalUW:16};
   const scorer = await createCandidateScorer({params:apparatus, loading:{flux:1e7}, timeMS:config.loadMS, metric:'atoms'});

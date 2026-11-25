@@ -178,7 +178,7 @@ export function mountSequenceEditor(host, { initialPreset = SEQUENCE_PRESETS[0],
     const samples = [];
     for (const [index, stage] of program.stages.entries()) {
       for (let j = 0; j <= 40; j++) {
-        const t = stage.startMS + stage.durationMS * j / 40;
+        const t = stage.startMS + stage.durationMS * (j / 40);
         // 同一个阶段边界分别绘制左、右极限，保持光闸及频率跳变为垂直沿。
         const sampleTime = j === 40 && index < program.stages.length - 1 ?
           stage.endMS - Math.min(1e-8, stage.durationMS * 1e-8) : t;
@@ -225,7 +225,8 @@ export function mountSequenceEditor(host, { initialPreset = SEQUENCE_PRESETS[0],
         const [name, unit, min, max] = sequenceFieldsFor(program.config)[key];
         label.append(element('span', '', name));
         const wrap = element('span', 'seq-unit-field'), input = element('input');
-        input.type = 'number'; input.step = 'any'; input.min = min; input.max = max;
+        input.type = 'number'; input.step = 'any'; input.min = min;
+        if (Number.isFinite(max)) input.max = max;
         input.required = true; input.dataset.key = key;
         input.setAttribute('aria-label', name + '，单位 ' + unit);
         input.value = String(program.config[key]);
@@ -268,14 +269,7 @@ export function mountSequenceEditor(host, { initialPreset = SEQUENCE_PRESETS[0],
     const config = { ...program.config };
     for (const input of form.querySelectorAll('[data-key]')) {
       const key = input.dataset.key;
-      if (input.tagName === 'SELECT') config[key] = input.value;
-      else {
-        if (!input.validity.valid) {
-          const [name, unit, min, max] = sequenceFieldsFor(program.config)[key];
-          throw new RangeError(name + '须在 ' + min + ' 至 ' + max + ' ' + unit + ' 之间。');
-        }
-        config[key] = input.valueAsNumber;
-      }
+      config[key] = input.tagName === 'SELECT' ? input.value : input.valueAsNumber;
     }
     host.querySelectorAll('[data-gate]').forEach(input => { config[input.dataset.gate] = input.checked; });
     return config;
