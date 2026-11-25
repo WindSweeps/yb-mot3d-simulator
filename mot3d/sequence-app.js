@@ -38,7 +38,7 @@ let loading = { flux:params.incidentFlux ?? DEFAULT_FLUX };
 const loadingByMode = new Map();
 let worker = null, timer = 0, job = 0, result = null, scene = null, population = null;
 let editValid = true, suspended = false, started = 0;
-let observeAtMS;
+let observeAtMS, importedObserveAtMS;
 
 async function initialInputs() {
   let previous;
@@ -209,7 +209,7 @@ const curves = mountSequenceCurves($('#sequence-curves'), t => { editor.pause();
 const editor = mountSequenceEditor($('#sequence-editor'), {
   initialPreset,
   onPreset(id) {
-    observeAtMS = undefined;
+    observeAtMS = id === 'imported' ? importedObserveAtMS : undefined;
     const url = new URL(location.href);
     if (id === 'imported') url.searchParams.delete('preset');
     else url.searchParams.set('preset', id);
@@ -239,6 +239,8 @@ const optimization = mountSequenceOptimization($('#sequence-optimizer'), {
   getCursor:() => timeMS,
   getInputs:() => ({config:editor.getConfig(), params:{...params}, loading:{...loading}, shader:computeShader}),
   apply(config, targetMS) {
+    optimization.setTargetTime(targetMS);
+    importedObserveAtMS = targetMS;
     editor.replace(config, {name:'梯度优化时序'});
     observeAtMS = targetMS;
     editor.setTime(targetMS);
@@ -384,11 +386,16 @@ $('#sequence-file').addEventListener('change', async event => {
     loadingByMode.set(program.config.mode, loading);
     params = imported; loading = { ...importedLoading }; fillInputs();
     imaging.setSettings(cameraSettings);
+    importedObserveAtMS = data.observeAtMS;
     editor.replace(compiled.config, {
       presetId:data.presetId, name:typeof data.presetName === 'string' && data.presetName.trim()
         ? data.presetName : file.name.replace(/\.json$/i, ''),
     });
     observeAtMS = data.observeAtMS;
+    if (observeAtMS !== undefined) {
+      editor.setTime(observeAtMS);
+      optimization.setTargetTime(observeAtMS);
+    }
     $('#sequence-file-status').textContent = '已载入 ' + file.name;
   } catch (e) {
     $('#sequence-file-status').textContent = '导入未完成 · ' + e.message;

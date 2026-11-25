@@ -31,6 +31,17 @@ export const SEQUENCE_FIELDS = Object.freeze({
   finalGradient: ['压缩末端主轴梯度', 'G/cm', -100, 100],
 });
 
+const {holdMS, ...twoColorFields} = SEQUENCE_FIELDS;
+const blueFields = {
+  loadMS: ['纯蓝装载时间', ...SEQUENCE_FIELDS.loadMS.slice(1)], holdMS,
+  blueObliqueMW: SEQUENCE_FIELDS.blueObliqueMW, blueHorizontalMW: SEQUENCE_FIELDS.blueHorizontalMW,
+  blueDetuningMHz: SEQUENCE_FIELDS.blueDetuningMHz, loadGradient: SEQUENCE_FIELDS.loadGradient,
+};
+
+export function sequenceFieldsFor(config) {
+  return config.mode === 'blue-only' ? blueFields : twoColorFields;
+}
+
 export function songSequence() {
   return {
     loadMS: 5000, handoffMS: 1, greenMS: 10, compressMS: 100,
@@ -75,10 +86,7 @@ export function compileSequence(input) {
   const config = { ...input };
   const blueOnly = config.mode === 'blue-only';
   if (config.mode !== undefined && !blueOnly) throw new RangeError('未知时序模式。');
-  const keys = blueOnly ? ['loadMS','holdMS','blueObliqueMW','blueHorizontalMW','blueDetuningMHz','loadGradient']
-    : Object.keys(SEQUENCE_FIELDS).filter(key => key !== 'holdMS');
-  for (const key of keys) {
-    const [label, unit, min, max] = SEQUENCE_FIELDS[key];
+  for (const [key, [label, unit, min, max]] of Object.entries(sequenceFieldsFor(config))) {
     if (!Number.isFinite(config[key]) || config[key] < min || config[key] > max)
       throw new RangeError(`${label}须在 ${min} 至 ${max} ${unit} 之间。`);
   }

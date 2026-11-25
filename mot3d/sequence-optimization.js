@@ -1,4 +1,3 @@
-import { compileSequence } from './sequence.js';
 import { optimizeSequence } from './sequence-gradient.js';
 import { createCandidateEvaluator } from './sequence-candidates.js';
 import { mountGradientPanel } from './sequence-gradient-panel.js';
@@ -49,11 +48,6 @@ export function mountSequenceOptimization(section, {getCursor, getInputs, apply}
       display(run, {}, true, '正在计算起始时序');
       const outcome = await optimizeSequence({config:inputs.config, variables, direction, maxEvaluations, timeMS,
         signal:run.controller.signal,
-        isFeasible(config) {
-          if (config.powerRamp === 'geometric' && [config.greenObliqueMW, config.greenHorizontalMW,
-            config.finalObliqueUW, config.finalHorizontalUW].some(p => p <= 0)) return false;
-          return compileSequence(config).durationMS >= timeMS;
-        },
         evaluate:async config => {
           const sample = await evaluator.evaluate(config);
           return sample.value;
@@ -66,7 +60,9 @@ export function mountSequenceOptimization(section, {getCursor, getInputs, apply}
       });
       if (active !== run) return;
       const messages = {budget:'已达到试算次数', stationary:'当前步长下未找到进一步改善',
-        stopped:'已停止', unavailable:'该时刻的起始目标值不可用'};
+        stopped:'已停止', unavailable:objective === 'psd'
+          ? '该时刻无法估计起始 PSD。至少需要 7 条阱内轨迹，且六维协方差须满秩。'
+          : '该时刻的阱内轨迹不足，无法计算起始目标值。'};
       display(run, outcome, false, messages[outcome.reason]);
     } catch (error) {
       if (!run || active === run) display(run ?? {direction,timeMS}, run?.progress ?? {}, false, '计算未完成 · ' + error.message);
@@ -78,5 +74,5 @@ export function mountSequenceOptimization(section, {getCursor, getInputs, apply}
     }
   }
 
-  return {invalidate, setContext:panel.setContext, destroy:invalidate};
+  return {invalidate, setContext:panel.setContext, setTargetTime:panel.setTargetTime, destroy:invalidate};
 }

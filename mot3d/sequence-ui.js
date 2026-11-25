@@ -1,4 +1,4 @@
-import { compileSequence, matchingSequencePreset, sequenceAt, SEQUENCE_FIELDS, SEQUENCE_PRESETS } from './sequence.js';
+import { compileSequence, matchingSequencePreset, sequenceAt, sequenceFieldsFor, SEQUENCE_PRESETS } from './sequence.js';
 
 const phases = [
   { keys: ['loadMS', 'blueDetuningMHz', 'shieldingMHz', 'loadGradient', 'blueObliqueMW', 'blueHorizontalMW', 'greenObliqueMW', 'greenHorizontalMW'],
@@ -222,8 +222,7 @@ export function mountSequenceEditor(host, { initialPreset = SEQUENCE_PRESETS[0],
         }
         input.value = program.config[key]; label.append(input);
       } else {
-        const [defaultName, unit, min, max] = SEQUENCE_FIELDS[key];
-        const name = key === 'loadMS' && program.config.mode === 'blue-only' ? '纯蓝装载时间' : defaultName;
+        const [name, unit, min, max] = sequenceFieldsFor(program.config)[key];
         label.append(element('span', '', name));
         const wrap = element('span', 'seq-unit-field'), input = element('input');
         input.type = 'number'; input.step = 'any'; input.min = min; input.max = max;
@@ -272,8 +271,7 @@ export function mountSequenceEditor(host, { initialPreset = SEQUENCE_PRESETS[0],
       if (input.tagName === 'SELECT') config[key] = input.value;
       else {
         if (!input.validity.valid) {
-          const [, unit, min, max] = SEQUENCE_FIELDS[key];
-          const name = input.closest('label').firstElementChild.textContent;
+          const [name, unit, min, max] = sequenceFieldsFor(program.config)[key];
           throw new RangeError(name + '须在 ' + min + ' 至 ' + max + ' ' + unit + ' 之间。');
         }
         config[key] = input.valueAsNumber;

@@ -3,7 +3,7 @@ import { createCandidateScorer } from './sequence-candidate-score.js';
 import { sequenceFrameAt } from './sequence-exposure.js';
 import { simulateSequence } from './sequence-physics.js';
 import { sequencePopulation } from './sequence-population.js';
-import { compileSequence, songSequence } from './sequence.js';
+import { blueSequence, compileSequence, songSequence } from './sequence.js';
 
 const params = {n:48, seed:399174, sourceDistanceMM:.3, sourceSpeed:.1, sourceSpread:.02,
   sourceRadiusMM:.1, sourceTempMK:.01, recoil:true};
@@ -40,4 +40,20 @@ const insufficient = await createCandidateScorer({params:{...params, n:5}, loadi
 assert.equal((await insufficient.evaluate(config)).value, null);
 insufficient.destroy();
 assert.throws(() => simulateSequence(params, config, {observeAtMS:program.durationMS+1}), RangeError);
+
+const blue = {...blueSequence(), loadMS:22, holdMS:3};
+const holdTime = 23.92217;
+const holdLoss = {flux:1e9, holdAlpha:.8, holdBeta:3e-8};
+const blueRun = simulateSequence(params, blue, {observeAtMS:holdTime});
+const blueFrame = blueRun.timesMS.indexOf(holdTime);
+assert.ok(blueFrame > 0);
+assert.equal(blueRun.stages.length, 2);
+const blueCloud = blueRun.metrics[blueFrame];
+const blueAtoms = sequencePopulation(compileSequence(blue), blueRun, holdLoss).at(holdTime, blueCloud.count);
+const blueScorer = await createCandidateScorer({params, loading:holdLoss, timeMS:holdTime, metric:'psd'});
+const blueScore = await blueScorer.evaluate(blue);
+assert.ok(blueAtoms * blueCloud.psdPerAtom > 0);
+assert.deepEqual(blueScore, {value:blueAtoms * blueCloud.psdPerAtom, sampledAtMS:holdTime, backend:'CPU'});
+assert.notEqual((await blueScorer.evaluate({...blue, loadGradient:30})).value, blueScore.value);
+blueScorer.destroy();
 console.log('优化候选与普通回放在四个目标读数、装载冻结、阶段边界和固定种子下逐值一致。');

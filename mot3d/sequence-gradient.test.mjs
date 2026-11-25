@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { compileSequence, songSequence } from './sequence.js';
+import { blueSequence, compileSequence, songSequence } from './sequence.js';
+import { createCandidateScorer } from './sequence-candidate-score.js';
 import { simulateSequence } from './sequence-physics.js';
 import { sequencePopulation } from './sequence-population.js';
 import { optimizeSequence } from './sequence-gradient.js';
@@ -45,7 +46,7 @@ test('按固定绝对时刻与仿真次数限制搜索，停止时保存已计�
   const stop = new AbortController();
   const trials = [];
   const settings = {
-    config, variables:['loadMS'], direction:'max',
+    config, timeMS, variables:['loadMS'], direction:'max',
     isFeasible:sequence => compileSequence(sequence).durationMS >= timeMS,
     evaluate(sequence) {
       const program = compileSequence(sequence);
@@ -86,4 +87,56 @@ test('物理变量边界、几何斜坡、零原子群及不可计算目标', as
   assert.equal(empty.reason, 'unavailable');
   assert.equal(empty.evaluations, 1);
   assert.equal(empty.bestConfig, null);
+});
+
+test('两个阶段沿固定终点的可行边界重新分配时长', async () => {
+  const timeMS = compileSequence(config).durationMS;
+  const scorer = await createCandidateScorer({params:apparatus, loading:{flux:1e7}, timeMS, metric:'atoms'});
+  const result = await optimizeSequence({config, timeMS, variables:['loadMS','compressMS'], direction:'min',
+    maxEvaluations:10, async evaluate(sequence) {
+      assert.ok(compileSequence(sequence).durationMS >= timeMS);
+      return (await scorer.evaluate(sequence)).value;
+    }});
+  scorer.destroy();
+  assert.ok(result.bestValue < result.baseline);
+  assert.ok(result.bestConfig.loadMS < config.loadMS);
+  assert.ok(result.bestConfig.compressMS > config.compressMS);
+});
+
+test('扩大差分范围能够跨过真实捕获计数的零梯度区间', async () => {
+  const sequence = {...config, loadMS:3, handoffMS:.1, greenMS:.1, compressMS:.1, blueObliqueMW:1, blueHorizontalMW:0};
+  const params = {...apparatus, n:8, sourceDistanceMM:2, sourceSpeed:.9, sourceSpread:.05, sourceTempMK:.002};
+  const scorer = await createCandidateScorer({params, loading:{flux:1e7}, timeMS:3, metric:'atoms'});
+  const trials = [];
+  const result = await optimizeSequence({config:sequence, timeMS:3, variables:['blueObliqueMW'], direction:'max',
+    maxEvaluations:22, async evaluate(candidate) {
+      const {value} = await scorer.evaluate(candidate);
+      trials.push([candidate.blueObliqueMW, value]);
+      return value;
+    }});
+  scorer.destroy();
+  const nearStart = trials.filter(([power]) => Math.abs(power - 1) <= .25);
+  assert.ok(nearStart.length >= 5 && nearStart.every(([,value]) => value === 0));
+  assert.ok(result.bestValue > 0 && result.bestConfig.blueObliqueMW < .75);
+});
+
+test('仅允许优化当前时序模式的变量', async () => {
+  const sequence = {...blueSequence(), compressMS:1};
+  await assert.rejects(optimizeSequence({config:sequence, variables:['compressMS'], direction:'min',
+    evaluate:temperatureAtLoad}), RangeError);
+});
+
+test('等比斜坡的功率搜索可越过半功率并始终严格为正', async () => {
+  const sequence = {...config, powerRamp:'geometric', finalHorizontalUW:16};
+  const scorer = await createCandidateScorer({params:apparatus, loading:{flux:1e7}, timeMS:config.loadMS, metric:'atoms'});
+  const tried = [];
+  const result = await optimizeSequence({config:sequence, timeMS:config.loadMS, variables:['finalHorizontalUW'],
+    direction:'max', maxEvaluations:24, async evaluate(candidate) {
+      tried.push(candidate.finalHorizontalUW);
+      return (await scorer.evaluate(candidate)).value;
+    }});
+  scorer.destroy();
+  assert.equal(tried.length, result.evaluations);
+  assert.equal(result.bestValue, result.baseline);
+  assert.ok(Math.min(...tried) < 4 && tried.every(value => value > 0));
 });
