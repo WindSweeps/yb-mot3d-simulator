@@ -1,4 +1,4 @@
-import { availableEngines, defaultEngine } from './engines.js';
+import { atomTier, availableEngines, defaultEngine } from './engines.js';
 import { DARK_BRANCHES, EMISSION_BRANCHES } from './branching.js';
 
 const returnProbability = new Intl.NumberFormat('zh-CN', {style:'percent', maximumFractionDigits:7});
@@ -45,6 +45,8 @@ function modelEquations(twoColor, resolved) {
 }
 
 function describe(simulation, engine) {
+  const tier = atomTier(engine);
+  if (tier) return describeMultilevel(simulation,tier);
   const twoColor = simulation === 'two-color', resolved = engine === 'rate-equations';
   const states = twoColor ? '¹P₁ 和 ³P₁ 各有三个磁子能级' : '¹P₁ 有三个磁子能级';
   const light = twoColor ? '399 nm 和 556 nm 光分别激发 ¹P₁ 和 ³P₁' : '399 nm 光激发 ¹P₁';
@@ -75,7 +77,30 @@ function describe(simulation, engine) {
     equations:modelEquations(twoColor, resolved)};
 }
 
-export function mountEnginePanel(host, {simulation, engine = defaultEngine, onSelect}) {
+function describeMultilevel(simulation,tier) {
+  const dark = tier >= 2, twoColor = simulation === 'two-color';
+  const text = ['在局部磁场方向上投影三种偏振。费米同位素保留各条超精细线以及基态磁子能级之间的光抽运。',
+    '³P₀ 原子在重力和可用的光阱中运动。³P₂ 另受塞曼势约束，重泵浦可将暗态原子送回冷却循环。',
+    '556 nm 反冲按空碰撞抽样。光偶极阱与晶格改变各态的势能和冷却共振。'];
+  const excited = equation('激发态稳态布居',sub('p','e') + '<mo>=</mo><mfrac><mrow>' + sum('g') +
+    sub('W','ge') + sub('p','g') + '</mrow><mrow>' + sub('Γ','e') + '<mo>+</mo>' + sum('g') + sub('W','ge') +
+    '</mrow></mfrac>');
+  const force = equation('辐射压力','<mi mathvariant="bold">F</mi><mo>=</mo>' + sum('jge') +
+    '<mi>ℏ</mi>' + sub('𝐤','j') + sub('W','jge') + '<mo>(</mo>' + sub('p','g') + '<mo>−</mo>' + sub('p','e') + '<mo>)</mo>');
+  const escape = equation('蓝光暗态跃迁速率', '<mi>κ</mi><mo>=</mo>' + sub('f','¹P₁') +
+    '<mo>(</mo>' + sub('a','0') + '<mo>+</mo>' + sub('a','2') + '<mo>)</mo>');
+  return {intro:text.slice(0,tier).join(''), alt:'镱的冷却、暗态与重泵浦能级。',
+    caption:dark ? '紫蓝色虚线标注 ¹P₁ 经过 ³D 态到达三重态的有效分支比。黄色箭头标注有限时间重泵浦的波长和自发分支。' :
+      '能级图以 ¹⁷⁴Yb 为例。费米同位素将冷却能级进一步分解为 F 和 mF。',
+    terms:'g、e 分别表示基态和激发态磁子能级。W 包含局部偏振、Clebsch–Gordan 系数、Doppler、Zeeman 和启用时的 AC Stark 频移。',
+    population:'两种颜色共用同一组基态布居。',
+    dark:dark ? '光学泄漏按激发布居推进，重泵浦按有限循环速率计算。' : '长寿命态跃迁终止亮态轨迹。',
+    recoil:tier === 3 ? '蓝光采用局部阻尼与动量扩散，绿光逐次抽样。' : '冷却光采用局部阻尼与动量扩散。',
+    equations:excited+force+escape,
+    image:dark ? 'yb-multilevel.svg' : (twoColor ? 'two-color' : 'blue')+'-rate-equations.svg'};
+}
+
+export function mountEnginePanel(host, {simulation, engine = defaultEngine, enginesFor = availableEngines, onSelect}) {
   host.classList.add('engine-panel');
   host.innerHTML =
     '<div class="engine-picker"><label>模拟引擎</label><select data-engine-select></select>' +
@@ -90,6 +115,7 @@ export function mountEnginePanel(host, {simulation, engine = defaultEngine, onSe
     '<details class="engine-notes"><summary>符号、近似与来源</summary><p></p><p></p>' +
     '<p class="engine-references"><a href="https://physics.nist.gov/PhysRefData/Handbook/Tables/ytterbiumtable5.htm" target="_blank" rel="noopener">NIST 镱能级表</a>' +
     '<a href="https://arxiv.org/pdf/1111.6225#page=3" target="_blank" rel="noopener">Cho 等 · 蓝光级联速率</a>' +
+    '<a data-atom-reference href="./YB-ATOM.md">镱引擎参数与验证</a>' +
     '<a data-green-reference href="https://arxiv.org/pdf/1208.0552#page=9" target="_blank" rel="noopener">Beloy 等 · 磁偶极矩阵元</a>' +
     '<a data-green-reference href="https://physics.nist.gov/Pubs/AtSpec/node17.html" target="_blank" rel="noopener">NIST 磁偶极辐射公式</a></p></details>';
   const select = host.querySelector('[data-engine-select]');
@@ -100,6 +126,7 @@ export function mountEnginePanel(host, {simulation, engine = defaultEngine, onSe
   const intro = host.querySelector('.engine-intro');
   const image = host.querySelector('img'), caption = host.querySelector('.engine-caption');
   const original = host.querySelector('.engine-original'), greenReferences = host.querySelectorAll('[data-green-reference]');
+  const atomReference = host.querySelector('[data-atom-reference]');
   const equations = host.querySelector('dl'), notes = host.querySelectorAll('.engine-notes p');
   let activeSimulation, activeEngine;
 
@@ -107,12 +134,15 @@ export function mountEnginePanel(host, {simulation, engine = defaultEngine, onSe
     const engine = select.value;
     confirm.disabled = engine === activeEngine;
     pending.textContent = confirm.disabled ? '' : '当前使用' +
-      availableEngines(activeSimulation).find(option => option.id === activeEngine).label + '，所选引擎待确认。';
+      enginesFor(activeSimulation).find(option => option.id === activeEngine).label + '，所选引擎待确认。';
     const guide = describe(activeSimulation, engine);
     intro.textContent = guide.intro;
     image.alt = guide.alt;
-    image.src = new URL('./engine-diagrams/' + activeSimulation + '-' + engine + '.svg', import.meta.url).href;
+    image.src = new URL('./engine-diagrams/' + (guide.image ?? activeSimulation + '-' + engine + '.svg'),import.meta.url).href;
     original.href = image.src;
+    host.dataset.previewTier = String(atomTier(engine));
+    atomReference.hidden = !atomTier(engine);
+    host.querySelector('figcaption strong').textContent = atomTier(engine) >= 2 ? '镱能级与重泵浦分支比' : '¹⁷⁴Yb 能级与分支比';
     for (const link of greenReferences) link.hidden = activeSimulation !== 'two-color';
     caption.textContent = guide.caption;
     equations.innerHTML = guide.equations;
@@ -122,7 +152,7 @@ export function mountEnginePanel(host, {simulation, engine = defaultEngine, onSe
 
   function update({simulation, engine = defaultEngine}) {
     if (activeSimulation === simulation && activeEngine === engine && select.value === engine) return;
-    const available = availableEngines(simulation);
+    const available = enginesFor(simulation);
     if (!available.some(option => option.id === engine))
       throw new RangeError('所选引擎无法运行当前模拟。');
     if (simulation !== activeSimulation) select.replaceChildren(...available.map(({id, label}) => new Option(label, id)));

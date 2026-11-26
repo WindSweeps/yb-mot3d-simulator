@@ -30,8 +30,17 @@ async function renderLevels({id, source}) {
     return node;
   }
   const colors = {blue:'#80cbff', green:'#abe890', dark:'#ffd19b', ground:'#e5eef5'};
-  const heights = {B:46, P2:116, V:185, P0:253, G:324};
-  const channels = {
+  const multi = id === 'yb-multilevel';
+  const heights = multi ? {S:45,B:110,D:175,P2:240,V:305,P0:370,G:435} : {B:46,P2:116,V:185,P0:253,G:324};
+  const width = multi ? 1180 : 600, height = multi ? 475 : 362;
+  const channels = multi ? {
+    'G-B':[145,394,'blue'], 'G-V':[233,393,'green'],
+    'B-P0':[329,342,'blue'], 'B-V':[417,277,'blue'], 'B-P2':[505,211,'blue'],
+    'P0-S':[591,85,'dark'], 'P2-S':[674,85,'dark'],
+    'S-P0':[752,335,'dark'], 'S-V':[824,269,'dark'], 'S-P2':[897,204,'dark'],
+    'P0-D':[936,338,'dark'], 'P2-D':[1021,207,'dark'],
+    'D-P0':[1021,338,'dark'], 'D-V':[1094,273,'dark'], 'D-P2':[1151,207,'dark'],
+  } : {
     'G-B':[151,293,'blue'], 'G-V':[241,293,'green'], 'V-G':[241,293,'green'],
     'B-P0':[350,219,'blue'], 'B-V':[450,151,'blue'], 'B-P2':[545,81,'blue'],
     'V-P0':[545,219,'green'],
@@ -42,16 +51,16 @@ async function renderLevels({id, source}) {
   if (!title || !description) throw new Error('Mermaid 图源缺少标题或能级说明。');
   svg.replaceChildren(title, description, defs);
   svg.removeAttribute('style');
-  svg.setAttribute('viewBox', '0 0 600 362');
-  svg.setAttribute('width', '600');
-  svg.setAttribute('height', '362');
+  svg.setAttribute('viewBox', '0 0 '+width+' '+height);
+  svg.setAttribute('width', width);
+  svg.setAttribute('height', height);
   svg.setAttribute('role', 'img');
   svg.setAttribute('aria-roledescription', '能级图');
   svg.setAttribute('font-family', 'Inter, PingFang SC, Microsoft YaHei, system-ui, sans-serif');
   svg.setAttribute('font-size', '18');
-  svg.append(element('rect', {width:600, height:362, fill:'#09121c'}), lines, transitions);
+  svg.append(element('rect', {width,height,fill:'#09121c'}), lines, transitions);
   lines.append(element('text',{x:3,y:17,fill:'#afc0cc','font-size':12},'能量'),
-    element('path',{d:'M14 327V27m-4 6 4-6 4 6',stroke:'#71879a',fill:'none'}));
+    element('path',{d:'M14 '+(heights.G+3)+'V27m-4 6 4-6 4 6',stroke:'#71879a',fill:'none'}));
   const used = Object.fromEntries(levels.map(node => [node.dataset.id, []]));
   const heads = new Set();
   for (const [index,edge] of edges.entries()) {
@@ -92,7 +101,7 @@ async function renderLevels({id, source}) {
     const [term,note] = [...node.querySelectorAll('.label text tspan.row')].map(row => row.textContent);
     if (!term || !note || !used[key].length) throw new Error('能级缺少项名、模型说明或跃迁。');
     const left = Math.min(...used[key])-16, right = Math.max(...used[key])+16;
-    const color = {B:colors.blue,V:colors.green,P0:colors.dark,P2:colors.dark,G:colors.ground}[key];
+    const color = {B:colors.blue,V:colors.green,P0:colors.dark,P2:colors.dark,G:colors.ground,D:colors.dark,S:colors.dark}[key];
     node.removeAttribute('transform');
     node.setAttribute('class','level');
     node.setAttribute('id',id+'-'+key);
@@ -111,13 +120,13 @@ try {
   const page = await browser.newPage();
   await page.addScriptTag({path:mermaidBundle});
   await page.evaluate(config => window.mermaid.initialize({...config,startOnLoad:false}), config);
-  for (const mode of ['blue','two-color']) {
-    for (const engine of ['lightweight','rate-equations']) {
-      const id = mode+'-'+engine;
-      const source = await readFile(join(directory,id+'.mmd'),'utf8');
-      const svg = await page.evaluate(renderLevels,{id,source});
-      await writeFile(join(directory,id+'.svg'), svg+'\n');
-    }
+  const models = ['blue-lightweight','blue-rate-equations','two-color-lightweight','two-color-rate-equations','yb-multilevel'];
+  const selection = process.argv[2] ? [process.argv[2]] : models;
+  for (const id of selection) {
+    if (!models.includes(id)) throw new RangeError('未知能级图。');
+    const source = await readFile(join(directory,id+'.mmd'),'utf8');
+    const svg = await page.evaluate(renderLevels,{id,source});
+    await writeFile(join(directory,id+'.svg'),svg+'\n');
   }
 } finally {
   await browser.close();

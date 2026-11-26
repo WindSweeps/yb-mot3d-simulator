@@ -109,6 +109,10 @@ try {
         branches[model] = {blue:await checkBlueBranches(mot.run,model),
           sequence:await checkSequenceBranching(sequence,model)};
       }
+      const sequential = await sequence.run(dark,{...config,greenDuringLoad:false},center);
+      const firstGreen = sequential.timesMS.indexOf(config.loadMS+config.handoffMS);
+      if (firstGreen < 0 || sequential.greenRates[0] !== 0 || sequential.greenRates[firstGreen] <= 0)
+        throw new Error('WebGPU 顺序冷却的装载光闸和绿光接收不一致。');
       // 关闭囚禁光后两条抛物线均从原点出发。较快的原子在保持中点越过 3 mm，终点又回到阱内。
       const freeFlight = await sequence.run({n:3,gravity:true,recoil:false},
         {...blueSequence(),loadMS:.1,holdMS:50,blueEnabled:false},

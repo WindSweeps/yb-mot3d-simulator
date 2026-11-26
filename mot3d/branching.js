@@ -1,14 +1,15 @@
 // ¹⁷⁴Yb 无再泵浦时，每次自发衰变进入长寿命态的概率。文献与推导见 METHOD.md。
 export const BLUE_DECAY_RATE = 2 * Math.PI * 29.13e6;
 export const GREEN_DECAY_RATE = 2 * Math.PI * 180e3;
+export const BLUE_CASCADE_RATES = Object.freeze({p0:6.18,p1:5.25,p2:.37});
 const fineStructureWavelengthAngstrom = 1e8 / (17992.007 - 17288.439);
 const greenMagneticDipoleRate = 2.69735e13 * 2 / (3 * fineStructureWavelengthAngstrom ** 3);
 export const DARK_BRANCHES = Object.freeze({
-  blueP0: 6.18 / BLUE_DECAY_RATE,
-  blueP2: 0.37 / BLUE_DECAY_RATE,
+  blueP0: BLUE_CASCADE_RATES.p0 / BLUE_DECAY_RATE,
+  blueP2: BLUE_CASCADE_RATES.p2 / BLUE_DECAY_RATE,
   greenP0: greenMagneticDipoleRate / GREEN_DECAY_RATE,
 });
-const blueCascadeP1 = 5.25 / BLUE_DECAY_RATE;
+const blueCascadeP1 = BLUE_CASCADE_RATES.p1 / BLUE_DECAY_RATE;
 export const EMISSION_BRANCHES = Object.freeze({
   blue399: 1 - DARK_BRANCHES.blueP0 - DARK_BRANCHES.blueP2 - blueCascadeP1,
   blue556: blueCascadeP1,

@@ -65,14 +65,17 @@ export function createSequenceRender(beamGroup, atomGroup, trailGroup, addLabel)
   const cloud = new THREE.Points(new THREE.BufferGeometry(), new THREE.ShaderMaterial({
     uniforms: { viewportHeight: {value: 1}, pixelRatio: {value: 1}, fluorescence: {value: true},
       blueOn: {value: true}, greenOn: {value: true}, sampleWeight: {value: 1}, sampleDiameter: {value: 1},
+      showDark: {value: true},
       emissionYields: {value:new THREE.Vector3(EMISSION_BRANCHES.blue399, EMISSION_BRANCHES.blue556, EMISSION_BRANCHES.green556)} },
     vertexShader: `
       attribute vec2 scattering;
+      attribute float weight, darkState;
       uniform float viewportHeight, pixelRatio, sampleWeight, sampleDiameter;
-      uniform bool fluorescence, blueOn, greenOn;
+      uniform bool fluorescence, blueOn, greenOn, showDark;
       uniform vec3 emissionYields;
       varying vec3 light;
       varying float alpha;
+      varying float darkMarker;
       void main() {
         vec2 absorption = scattering * vec2(blueOn ? 1.0 : 0.0, greenOn ? 1.0 : 0.0);
         vec2 rates = vec2(absorption.x * emissionYields.x, dot(absorption, emissionYields.yz));
@@ -81,19 +84,32 @@ export function createSequenceRender(beamGroup, atomGroup, trailGroup, addLabel)
           ? (rates.x * vec3(0.66,0.59,1.0) + rates.y * vec3(0.40,1.0,0.39)) / max(total, 0.000001)
           : vec3(0.58,0.82,0.93);
         alpha = fluorescence ? min(1.0, log(1.0 + total/1500.0) / 7.0) * sampleWeight : 0.65;
+        alpha *= weight;
+        darkMarker = darkState;
+        if (darkState > 0.0) {
+          light = darkState == 2.0 ? vec3(1.0,0.78,0.36) : vec3(0.71,0.85,0.91);
+          alpha = showDark ? min(0.85, 4.0 * sqrt(weight)) : 0.0;
+        }
         vec4 mv = modelViewMatrix * vec4(position,1.0);
         gl_Position = projectionMatrix * mv;
         gl_PointSize = clamp(0.30 * projectionMatrix[1][1] * viewportHeight * 0.5 / max(-mv.z,0.01),
                              (fluorescence ? 6.0 : 4.0) * pixelRatio, 50.0 * pixelRatio);
         if (fluorescence) gl_PointSize *= sampleDiameter;
+        if (darkState > 0.0) gl_PointSize = clamp(gl_PointSize, 5.0 * pixelRatio, 13.0 * pixelRatio);
       }`,
     fragmentShader: `
       varying vec3 light;
       varying float alpha;
+      varying float darkMarker;
       void main() {
         vec2 d = 2.0 * gl_PointCoord - 1.0;
         float r2 = dot(d,d);
         if (r2 >= 1.0 || alpha <= 0.0) discard;
+        if (darkMarker > 0.0) {
+          if (r2 < 0.28 || (darkMarker != 2.0 && abs(d.x)+abs(d.y) > 1.10)) discard;
+          gl_FragColor = vec4(light, alpha * (1.0-smoothstep(0.72,1.0,r2)));
+          return;
+        }
         gl_FragColor = vec4(light, alpha * exp(-3.0*r2) * (1.0-r2));
       }`,
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
@@ -130,7 +146,8 @@ export function createSequenceRender(beamGroup, atomGroup, trailGroup, addLabel)
   trailGroup.add(stream);
   let streamResult = null;
   function updateLoadingStream(sample, waistMM) {
-    const visible = Boolean(sample.loadingSource && sample.stageId === 'load' && sample.incidentFlux > 0);
+    const visible = Boolean(sample.loadingSource && sample.loadingSource.incidentN === undefined &&
+      sample.stageId === 'load' && sample.incidentFlux > 0);
     const changed = visible !== stream.visible;
     stream.visible = visible;
     if (!sample.loadingSource) streamResult = null;
@@ -169,9 +186,11 @@ export function createSequenceRender(beamGroup, atomGroup, trailGroup, addLabel)
       if (total > 0) arrows[i].setColor(arrowColor.lerpColors(tones[0], tones[1], powers[1][i] / total));
     }
     const uniforms = cloud.material.uniforms;
+    const yields = sample.emissionBranches ?? EMISSION_BRANCHES;
+    uniforms.emissionYields.value.set(yields.blue399,yields.blue556,yields.green556);
     uniforms.blueOn.value = powers[0].some(p => p > 0);
     uniforms.greenOn.value = powers[1].some(p => p > 0);
-    const { positionsM, alive, blueRates, greenRates } = sample;
+    const {positionsM,alive,blueRates,greenRates,darkStates,sampleWeights} = sample;
     if (!positionsM) {
       cloud.geometry.setDrawRange(0, 0);
       tails.geometry.setDrawRange(0, 0);
@@ -183,9 +202,9 @@ export function createSequenceRender(beamGroup, atomGroup, trailGroup, addLabel)
       throw new RangeError('时序场景的粒子位置与散射率数量不一致。');
     // 固定入射系综下，每个标记的总亮度按 1/n 归一。分配给透明度与面积，可避免高采样时单个像素的贡献低于显示精度。
     const referenceCount = 192, referenceAlpha = Math.sqrt(32/referenceCount);
-    const opacity = Math.min(1, Math.sqrt(32/n));
+    const incident = sample.incidentN ?? n, opacity = Math.min(1,Math.sqrt(32/incident));
     uniforms.sampleWeight.value = sample.incidentFlux === 0 ? 0 : opacity;
-    uniforms.sampleDiameter.value = Math.sqrt(referenceCount*referenceAlpha/(n*opacity));
+    uniforms.sampleDiameter.value = Math.sqrt(referenceCount*referenceAlpha/(incident*opacity));
     if (positionsM.buffer === buffer && positionsM.byteOffset === offset && positionsM.length === length) {
       if (!sample.previousPositionsM) tails.geometry.setDrawRange(0, 0);
       return false;
@@ -198,23 +217,28 @@ export function createSequenceRender(beamGroup, atomGroup, trailGroup, addLabel)
       cloud.geometry = new THREE.BufferGeometry();
       cloud.geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(3*n), 3).setUsage(THREE.DynamicDrawUsage));
       cloud.geometry.setAttribute('scattering', new THREE.BufferAttribute(new Float32Array(2*n), 2).setUsage(THREE.DynamicDrawUsage));
+      cloud.geometry.setAttribute('weight',new THREE.BufferAttribute(new Float32Array(n),1).setUsage(THREE.DynamicDrawUsage));
+      cloud.geometry.setAttribute('darkState',new THREE.BufferAttribute(new Float32Array(n),1).setUsage(THREE.DynamicDrawUsage));
     }
-    const {position, scattering} = cloud.geometry.attributes;
+    const {position,scattering,weight,darkState} = cloud.geometry.attributes;
     const trailPositions = tails.geometry.attributes.position;
     const previous = sample.previousPositionsM;
     const recent = previous && sample.previousDtMS > 0 && sample.previousDtMS <= .5;
     let visible = 0, vertices = 0;
     for (let i = 0; i < n; i++) {
-      if (!alive[i]) continue;
+      const status = darkStates?.[i] ?? 0;
+      if (!alive[i] && !status) continue;
       const k = 3*i, x = 1000*positionsM[k], y = 1000*positionsM[k+1], z = 1000*positionsM[k+2];
       position.setXYZ(visible, x, y, z);
+      weight.setX(visible,sampleWeights?.[i] ?? 1);
+      darkState.setX(visible,status);
       scattering.setXY(visible++, blueRates[i], greenRates[i]);
       if (recent && i < maxTrails && sample.previousAlive?.[i]) {
         trailPositions.setXYZ(vertices++, 1000*previous[k], 1000*previous[k+1], 1000*previous[k+2]);
         trailPositions.setXYZ(vertices++, x, y, z);
       }
     }
-    position.needsUpdate = scattering.needsUpdate = true;
+    position.needsUpdate = scattering.needsUpdate = weight.needsUpdate = darkState.needsUpdate = true;
     trailPositions.needsUpdate = vertices > 0;
     cloud.geometry.setDrawRange(0, visible);
     tails.geometry.setDrawRange(0, vertices);

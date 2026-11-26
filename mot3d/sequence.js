@@ -1,3 +1,5 @@
+import { activeAtomPulse, compileAtomSettings } from './sequence-atom-settings.js';
+
 // 所有通道共享同一物理时钟。单位与时序编辑器一致：ms、MHz、mW、G/cm。
 export const SEQUENCE_STAGES = Object.freeze([
   { id: 'load', label: '双色装载' },
@@ -39,7 +41,13 @@ const blueFields = {
 };
 
 export function sequenceFieldsFor(config) {
-  return config.mode === 'blue-only' ? blueFields : twoColorFields;
+  const fields = config.mode === 'blue-only' ? blueFields : twoColorFields;
+  if (config.detuningReference !== '174Yb') return fields;
+  const detuningRanges = {blueDetuningMHz:2500,shieldingMHz:6500,receiveMHz:6500,compressMHz:6500};
+  return Object.fromEntries(Object.entries(fields).map(([key,definition]) => {
+    const limit = detuningRanges[key];
+    return [key,limit ? [...definition.slice(0,2),-limit,limit] : definition];
+  }));
 }
 
 export function songSequence() {
@@ -75,6 +83,10 @@ export const SEQUENCE_PRESETS = Object.freeze([
   Object.freeze({
     id:'blue-mot-399nm', name:'纯蓝 MOT（399 nm）', config:Object.freeze(blueSequence()),
   }),
+  Object.freeze({
+    id:'blue-to-green-yb',name:'399 → 556 nm 顺序冷却',engine:'yb-l3',
+    config:Object.freeze({...songSequence(),greenDuringLoad:false,loadGradient:24}),
+  }),
 ]);
 
 export function matchingSequencePreset(config) {
@@ -95,18 +107,22 @@ export function compileSequence(input) {
   for (const key of ['blueEnabled', 'greenEnabled'])
     if (typeof config[key] !== 'boolean') throw new TypeError('光路开关需要布尔值。');
   if (blueOnly && config.greenEnabled) throw new RangeError('纯蓝时序需要关闭 556 nm 光路。');
+  if (config.greenDuringLoad !== undefined && typeof config.greenDuringLoad !== 'boolean')
+    throw new TypeError('装载阶段的 556 nm 光闸需要布尔值。');
   if (!blueOnly && !['linear', 'smooth', 'geometric'].includes(config.powerRamp)) throw new RangeError('未知绿光功率曲线。');
   if (!blueOnly && config.powerRamp === 'geometric' &&
       [config.greenObliqueMW, config.greenHorizontalMW, config.finalObliqueUW, config.finalHorizontalUW].some(p => p <= 0))
     throw new RangeError('使用等比功率斜坡时，起点和终点的各束绿光功率需要大于零。');
   let time = 0;
-  const stages = (blueOnly ? BLUE_STAGES : SEQUENCE_STAGES).map(({ id, label }) => {
+  const stages = (blueOnly ? BLUE_STAGES : SEQUENCE_STAGES).map(({id,label}) => {
     const durationMS = config[id + 'MS'], startMS = time;
     time += durationMS;
-    return { id, label, startMS, endMS: time, durationMS };
+    return {id,label:id === 'load' && config.greenDuringLoad === false ? '纯蓝装载' : label,
+      startMS,endMS:time,durationMS};
   });
   const midpoint = blueOnly ? stages[1].startMS + stages[1].durationMS/2 : stages[2].endMS;
-  return { config, stages, durationMS: time, checkpointTimesMS: [stages[0].endMS, midpoint, time] };
+  return { config, stages, durationMS: time, checkpointTimesMS: [stages[0].endMS, midpoint, time],
+    atom:compileAtomSettings(config,time) };
 }
 
 function sixBeams(oblique, horizontal) {
@@ -128,15 +144,18 @@ export function sequenceAt(program, timeMS) {
   const stageIndex = index < 0 ? program.stages.length - 1 : index;
   const stage = program.stages[stageIndex], c = program.config;
   const elapsedMS = t - stage.startMS;
+  const atom = program.atom;
+  const repump = activeAtomPulse(atom.repump,t), trap = activeAtomPulse(atom.trap,t);
+  const absoluteFrequency = atom.values.detuningReference === '174Yb';
   if (c.mode === 'blue-only') {
     return { stageIndex, stageId:stage.id, elapsedMS, timeMS:t, blueOn:c.blueEnabled, greenOn:false,
       bluePowersMW:sixBeams(c.blueEnabled ? c.blueObliqueMW : 0, c.blueEnabled ? c.blueHorizontalMW : 0),
       greenPowersMW:sixBeams(0, 0), blueDetuningMHz:c.blueDetuningMHz, greenDetuningMHz:0,
-      gradientGCM:c.loadGradient };
+      gradientGCM:c.loadGradient, repump, trap, absoluteFrequency };
   }
   const u = t === stage.endMS ? 1 : Math.min(1, Math.max(0, elapsedMS / stage.durationMS));
   const blueOn = c.blueEnabled && stageIndex <= 1;
-  const greenOn = c.greenEnabled;
+  const greenOn = c.greenEnabled && (stageIndex !== 0 || c.greenDuringLoad !== false);
   const blueScale = blueOn ? (stageIndex === 1 ? 1 - u : 1) : 0;
   let oblique = c.greenObliqueMW, horizontal = c.greenHorizontalMW;
   let greenDetuningMHz = c.receiveMHz, gradientGCM = c.receiveGradient;
@@ -154,5 +173,5 @@ export function sequenceAt(program, timeMS) {
   return { stageIndex, stageId: stage.id, elapsedMS, timeMS: t, blueOn, greenOn,
     bluePowersMW: sixBeams(c.blueObliqueMW * blueScale, c.blueHorizontalMW * blueScale),
     greenPowersMW: sixBeams(greenOn ? oblique : 0, greenOn ? horizontal : 0),
-    blueDetuningMHz: c.blueDetuningMHz, greenDetuningMHz, gradientGCM };
+    blueDetuningMHz: c.blueDetuningMHz, greenDetuningMHz, gradientGCM, repump, trap, absoluteFrequency };
 }

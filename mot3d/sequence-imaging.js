@@ -97,8 +97,9 @@ export function simulateImagingFrame(sample, input = {}) {
   const grid = new Float64Array(width * width);
   const [h, v] = projections[s.axis];
   const fluorescence = s.mode === 'fluorescence';
-  const blueYield = (s.band === '556' ? 0 : EMISSION_BRANCHES.blue399) + (s.band === '399' ? 0 : EMISSION_BRANCHES.blue556);
-  const greenYield = s.band === '399' ? 0 : EMISSION_BRANCHES.green556;
+  const {blue399,blue556,green556} = sample.emissionBranches ?? EMISSION_BRANCHES;
+  const blueYield = (s.band === '556' ? 0 : blue399) + (s.band === '399' ? 0 : blue556);
+  const greenYield = s.band === '399' ? 0 : green556;
   let sampleCount = 0, weightedAtoms = 0;
   for (let i = 0; i < n; i++) {
     if (!alive[i]) continue;

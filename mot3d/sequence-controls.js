@@ -3,6 +3,9 @@ import { DEFAULT_FLUX } from './fluorescence.js';
 import { IMAGING_DEFAULTS } from './sequence-imaging.js';
 import { compileSequence, sequenceFieldsFor } from './sequence.js';
 import { sequenceLossStages } from './sequence-population.js';
+import { atomTier } from './engines.js';
+import { YB_SEQUENCE_CHOICES, YB_SEQUENCE_FIELDS } from './sequence-atom-settings.js';
+import { DEFAULT_ISOTOPE, YB_ISOTOPES, YB_REPUMPS } from './yb-atom.js';
 
 const numeric = (id, label, unit, min, max, scale = 1) => ({id, label, unit, min, max, scale, kind:'number'});
 const choice = (id, label, options) => ({id, label, unit:'', kind:'choice', choices:options.map(([value, label]) => ({value, label}))});
@@ -37,27 +40,48 @@ const modelSettings = [choice('params.gravity','重力',gates), choice('params.r
 
 export function experimentControls(experiment) {
   const {config} = experiment, blueOnly = config.mode === 'blue-only';
+  const program = compileSequence(config), tier = atomTier(experiment.params?.engine);
   const sequence = Object.entries(sequenceFieldsFor(config)).map(([id,args]) => numeric(id,...args));
   sequence.push(choice('blueEnabled','399 nm 光闸',gates));
-  if (!blueOnly) sequence.push(choice('greenEnabled','556 nm 光闸',gates), choice('powerRamp','压缩功率波形',ramps));
+  if (!blueOnly) sequence.push(choice('greenEnabled','556 nm 光闸',gates),
+    choice('greenDuringLoad','装载时的 556 nm 光路',gates),choice('powerRamp','压缩功率波形',ramps));
   const losses = [numeric('loading.flux','入射原子通量','原子/s',0,1e15,1e6)];
   const alphaLabel = experiment.loading?.alphaMode === 'total' ? '总单体损失目标 α' : '背景单体损失 α';
-  for (const {id,label} of compileSequence(config).stages) {
+  for (const {id,label} of program.stages) {
     const load = id === 'load';
     losses.push(numeric('loading.' + (load ? 'alpha' : id + 'Alpha'),label + alphaLabel,'s⁻¹',0,1e4,.01),
       numeric('loading.' + (load ? 'beta' : id + 'Beta'),label + '双体损失 β','(原子·s)⁻¹',0,1,1e-9));
   }
-  return [['时序',sequence],['光束几何',blueOnly ? [lenses[0]] : lenses],['冷原子束',source],['磁场',magnetic],
+  const atomic = [];
+  if (tier) {
+    atomic.push(choice('params.isotope','镱同位素',YB_ISOTOPES.map(isotope => [isotope,isotope])),
+      choice('detuningReference',YB_SEQUENCE_CHOICES.detuningReference[0],YB_SEQUENCE_CHOICES.detuningReference[2]));
+    const keys = ['atomStepUS','leakP0','leakP1','leakP2'];
+    if (tier >= 2 && program.atom.values.atomLossMode === 'reservoir') {
+      keys.push('repumpLeadMS','repumpDurationMS','repumpWaistMM',...YB_REPUMPS.map(({key}) => key));
+      atomic.push(choice('p2Branches','³P₂ 子轨迹数',Array.from({length:8},(_,i) => [i+1,String(i+1)])));
+      atomic.push(choice('darkDecay',YB_SEQUENCE_CHOICES.darkDecay[0],YB_SEQUENCE_CHOICES.darkDecay[2]));
+    }
+    if (tier === 3 && program.atom.trap) {
+      keys.push('trapLeadMS','trapDurationMS','trapPowerMW','trapWaistUM','trapPolarizationDeg',
+        'alphaGround','alphaBlue','tensorBlue','alphaGreen','tensorGreen','alphaP0','alphaP2','tensorP2');
+      atomic.push(choice('trapMode',YB_SEQUENCE_CHOICES.trapMode[0],YB_SEQUENCE_CHOICES.trapMode[2]));
+    }
+    for (const key of keys) atomic.push(numeric(key,...YB_SEQUENCE_FIELDS[key].slice(0,4)));
+  }
+  return [['时序',sequence],['镱引擎',atomic],['光束几何',blueOnly ? [lenses[0]] : lenses],['冷原子束',source],['磁场',magnetic],
     ['通量与损失',losses],['相机成像',camera],['模型设置',modelSettings]].flatMap(([group,controls]) => controls.map(control => ({...control, group})));
 }
 
 // 表单留空时继承当前光色的文献系数。未被选中试探的空字段继续随光色变化。
 export function readControl(experiment, id) {
   const [section, key, index] = id.split('.');
-  if (!key) return experiment.config[id];
+  if (!key) return experiment.config[id] ?? (id === 'greenDuringLoad' ? true :
+    YB_SEQUENCE_FIELDS[id]?.[4] ?? YB_SEQUENCE_CHOICES[id]?.[1]);
   if (section === 'params') {
     const params = experiment.params ?? {};
-    const value = params[key] ?? (key === 'greenWaistMM' ? params.waistMM ?? DEFAULTS.waistMM : DEFAULTS[key]);
+    const value = params[key] ?? (key === 'greenWaistMM' ? params.waistMM ?? DEFAULTS.waistMM :
+      key === 'isotope' ? DEFAULT_ISOTOPE : DEFAULTS[key]);
     return index === undefined ? value : value[index];
   }
   if (section === 'imaging') return experiment.imaging?.[key] ?? IMAGING_DEFAULTS[key];

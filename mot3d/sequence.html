@@ -85,6 +85,7 @@
         <div id="sequence-viewport" class="scene-viewport" aria-label="MOT 的六束光、线圈和原子"></div>
         <fieldset class="sequence-layers"><legend class="sr-only">三维图层</legend>
           <label><input type="checkbox" data-seq-layer="beams" checked> 光束</label><label><input type="checkbox" data-seq-layer="coils" checked> 线圈</label><label><input type="checkbox" data-seq-layer="trails" checked> 轨迹</label><label><input type="checkbox" data-seq-layer="fluorescence" checked> 荧光</label>
+          <label id="seq-dark-layer" hidden><input type="checkbox" data-seq-layer="metastable" checked> 暗态位置</label>
         </fieldset>
         <div class="sequence-scene-status"><span id="sequence-compute-status" role="status">正在准备求解器</span><button type="button" class="text-button" id="sequence-retry" hidden>重新计算</button></div>
         <p id="sequence-scene-error" role="alert" hidden></p>
@@ -116,7 +117,7 @@
           <g class="seq-loss-guides" aria-hidden="true"></g>
           <line id="seq-curve-cursor"></line><rect id="seq-curve-area" fill="transparent"></rect>
         </svg>
-        <p class="sequence-note">PSD 为六维高斯等效峰值相空间密度。样本不足或协方差退化时，PSD 曲线留空。装载轨迹积分结束后，沿用该时刻的云团分布，并按装载方程更新原子数。</p>
+        <p class="sequence-note">PSD 为六维高斯等效峰值相空间密度。样本不足或协方差退化时，PSD 曲线留空。</p>
       </section>
       <section class="sequence-readings" id="sequence-readings" aria-label="样本与转移效率">
         <h2>原子样本</h2>
@@ -132,10 +133,18 @@
           <div><span>动能温度</span><output><b id="seq-temperature">—</b> µK</output></div>
           <div><span>云团 RMS 半径</span><output><b id="seq-radius">—</b> mm</output></div>
         </div>
-        <div class="sequence-stat-grid" aria-label="累计进入暗态的模拟轨迹数">
-          <div><span>399 nm → ³P₀ 轨迹数</span><output id="seq-blue-p0">—</output></div>
-          <div><span>399 nm → ³P₂ 轨迹数</span><output id="seq-blue-p2">—</output></div>
-          <div id="seq-green-branch"><span>556 nm → ³P₀ 轨迹数</span><output id="seq-green-p0">—</output></div>
+        <div class="sequence-stat-grid" aria-label="累计暗态跃迁">
+          <div><span>399 nm → ³P₀</span><output id="seq-blue-p0">—</output></div>
+          <div><span>399 nm → ³P₂</span><output id="seq-blue-p2">—</output></div>
+          <div id="seq-green-branch"><span>556 nm → ³P₀</span><output id="seq-green-p0">—</output></div>
+        </div>
+        <div id="seq-atom-ledger" hidden>
+          <div class="sequence-stat-grid">
+            <div><span>磁阱 ³P₂ 原子数</span><output id="seq-magnetic-atoms">—</output></div>
+            <div><span>未磁束缚暗态原子数</span><output id="seq-free-dark-atoms">—</output></div>
+            <div><span>重泵浦累计回流</span><output id="seq-repumped-atoms">—</output></div>
+          </div>
+          <p id="seq-dark-ess" class="sequence-note"></p>
         </div>
         <table class="sequence-transfer"><thead><tr><th scope="col">观察时刻</th><th scope="col">估计原子数</th><th scope="col">留存轨迹</th><th scope="col">捕获 / 转移效率</th></tr></thead><tbody>
           <tr><th scope="row"><button type="button" class="text-button" data-checkpoint="0">装载结束 N₀</button></th><td id="seq-atoms-n0">—</td><td id="seq-n0">—</td><td id="seq-e0">—</td></tr>
@@ -157,7 +166,7 @@
               <tr data-loss-stage="hold" hidden><th scope="row">关源保持<small></small></th><td><input aria-label="保持单体损失系数" name="holdAlpha" type="number" min="0" max="1e4" step="any"></td><td><input aria-label="保持双体损失系数" name="holdBeta" type="number" min="0" max="1" step="any"></td></tr>
             </tbody></table>
           </form>
-          <p class="sequence-note">装载率为入射通量 Φ 乘以亮态捕获概率 p。持续装载期间，模型按捕获云的平均散射率计算暗态损失。关源后逐条轨迹记录进入暗态或逃逸的原子。</p>
+          <p class="sequence-note" id="seq-loading-method"></p>
           <p class="sequence-note" id="seq-loading-reference">宋博组测得双色 MOT 装载率为 8.4 × 10⁷ 原子/s，稳态为 1.15 × 10⁸ 个原子。<a href="https://arxiv.org/html/2503.24383v2#S5.T2" target="_blank" rel="noopener">宋博组，表 II ↗</a></p>
           <p class="sequence-note" id="seq-alpha-note"></p>
           <p class="sequence-note">双体损失按 βN² 计算，β 取宋博组表 II 中相应光色的装载或保持拟合值。纯绿与无光阶段取零。清空输入可恢复该阶段的默认系数。</p>
@@ -175,7 +184,7 @@
       <p class="sequence-note" id="sequence-geometry"></p>
     </details>
     <details class="sequence-method"><summary>光与原子能级的相互作用</summary>
-      <p id="sequence-light-force">模拟逐步计算每个 ¹⁷⁴Yb 原子受到的平均辐射压力。399 nm 蓝光驱动 ¹S₀ → ¹P₁，556 nm 绿光驱动 ¹S₀ → ³P₁。两条跃迁共享同一个基态。每个激发态都有 <i>m′</i> = −1、0、+1 三个磁子能级，分别与相对于局部磁场方向的 σ⁻、π、σ⁺ 偏振分量耦合。<a href="#sequence-engine">当前引擎的原理图与公式</a> · <a href="https://arxiv.org/html/2503.24383v2#S4" target="_blank" rel="noopener">Li 等，双色 MOT 的能级与布居 ↗</a></p>
+      <p id="sequence-light-force">399 nm 和 556 nm 冷却分别驱动 ¹S₀ → ¹P₁ 和 ¹S₀ → ³P₁，两条跃迁共享基态。<a href="#sequence-engine">当前引擎的能级图与公式</a> · <a href="https://arxiv.org/html/2503.24383v2#S4" target="_blank" rel="noopener">Li 等，双色 MOT 的能级与布居 ↗</a></p>
       <p>每束光对每条跃迁分量的有效失谐为 Δ<sub>eff</sub> = Δ − <b>k</b>·<b>v</b> − <i>m′g′</i>μ<sub>B</sub>|<b>B</b>|/ℏ，各项均用角频率。运动产生多普勒频移，局部磁场使三个磁子能级发生不同的塞曼频移。结合原子所在位置的高斯光强、偏振权重和饱和效应，模型算出每束光的散射率，并按共享基态的布居修正两种颜色的散射率。</p>
       <p>第 <i>j</i> 束光的每次吸收向原子传递动量 ℏ<b>k</b><sub>j</sub>。各束贡献相加得到平均光力 <b>F</b> = ∑<sub>j</sub> ℏ<b>k</b><sub>j</sub><i>R</i><sub>j</sub>，其中 <i>R</i><sub>j</sub> 为该束光在当前时刻的散射率。相向光束的散射率之差决定原子受到的恢复力与速度阻尼。轨迹积分另计重力。启用随机反冲时，蓝光用动量扩散近似，绿光逐个抽样吸收和自发辐射事件。</p>
       <p>每次 399 nm 自发衰变经级联进入 ³P₀、³P₂ 的概率分别为 3.38 × 10⁻⁸ 和 2.02 × 10⁻⁹。每次 556 nm 自发衰变经磁偶极跃迁进入 ³P₀ 的概率估计为 5.54 × 10⁻⁹。模型根据每个原子的实际散射率抽取进入暗态的时刻。无再泵浦时，该原子随后退出亮态计数与荧光计算。<a href="./METHOD.md">分支比来源与计算方法</a></p>
@@ -186,8 +195,8 @@
       <p>宋博组在双色装载时将 556 nm 设为蓝失谐。交接开始时，绿光跳至红失谐，399 nm 在 1 ms 内关闭。压缩时改变绿光失谐、降低功率并提高梯度。网页把论文的两对强光分配给 V1、V2，一对弱光分配给沿 Y 轴的 H。<a href="https://arxiv.org/pdf/2503.24383v2#page=3" target="_blank" rel="noopener">Li 等，第 V 节 ↗</a></p>
       <p>arXiv:2503.24383v2 预设取纯绿接收 10 ms，弱光每束按初始功率比例降至 14.9 µW。AI 优化预设以压缩结束时的六维高斯等效峰值相空间密度为优化目标。</p>
       <p>纯蓝 MOT 使用宋博组的 399 nm 参数，按图 4(b) 装载 5 s。随后关闭原子束，蓝光和磁场继续囚禁原子。预设的 100 ms 保持时间是可调的模拟观察窗口。<a href="https://arxiv.org/html/2503.24383v2#S5" target="_blank" rel="noopener">Li 等，第 V 节 ↗</a></p>
-      <p>装载阶段用最初 20 ms 的轨迹估计捕获概率，并用速率方程计算整个装载时段的原子数。关闭原子束后逐步积分同一批留存原子。温度由扣除云团平均速度后的三维速度方差计算，RMS 半径由相对云心的三维位移计算。</p>
-      <p>WebGPU 并行积分各条轨迹，三维视图显示采样位置和相对荧光亮度，相机用每条阱内轨迹代表的原子数计算信号。提高轨迹数可降低捕获比例和云团分布的抽样波动。绝对原子数取决于入射通量、捕获率和损失系数。宋博组报告的压缩末态约为 10⁸ 个原子。<a href="https://arxiv.org/html/2503.24383v2#S5" target="_blank" rel="noopener">Li 等，第 V 节 ↗</a></p>
+      <p>轻量与局部稳态模型用最初 20 ms 的轨迹估计捕获概率。镱多能级引擎按实际入射时刻推进整段时序。温度由相对于云团平均速度的三维速度方差计算，RMS 半径由相对于云心的三维位移计算。</p>
+      <p>三维视图显示采样位置和相对荧光亮度。相机按每条轨迹代表的原子数计算信号。绝对原子数取决于入射通量、捕获和损失。<a href="./YB-ATOM.md">镱多能级引擎参数与验证</a></p>
       <p>成像视场以曝光结束时的磁场中心为原点。荧光使用阱内样本在曝光窗内的散射率，合并两种波长时采用相同的探测效率。弱探针吸收按柱密度计算透射光，再经过成像系统模糊并扣除暗场，得到光学厚度。图像给出相机的期望信号，未加入随机读出噪声、多重散射或探针反冲。<a href="https://arxiv.org/pdf/1509.03233#page=9" target="_blank" rel="noopener">Yamamoto 等，Yb 荧光探测效率 ↗</a> · <a href="https://arxiv.org/pdf/0707.2930#page=2" target="_blank" rel="noopener">Reinaudi 等，三帧吸收成像 ↗</a></p>
     </details>
     <p id="sequence-file-status" role="status"></p>
@@ -204,6 +213,7 @@ struct Apparatus {
   detuning: vec4f,        // 蓝光、绿光装载、接收、压缩的归一化失谐 2Δ/Γ
   gradientsRamp: vec4f,   // 装载、接收、压缩末端的梯度及绿光功率波形
   branches: vec4f,        // 蓝光到 ³P₀、³P₂、绿光到 ³P₀ 的分支比、速率方程开关
+  loadGates: vec4f,      // 装载阶段的 556 nm 光闸
 }
 struct Atom {
   pos: vec3f, live: u32,
@@ -239,7 +249,10 @@ struct Radiation {
 fn channels(stage: u32, fraction: f32) -> Channels {
   let u = clamp(fraction, 0.0, 1.0);
   var c = Channels(lab.peak, lab.detuning.xy, lab.gradientsRamp.x);
-  if (stage == 0u) { return c; }
+  if (stage == 0u) {
+    c.peak = vec4f(lab.peak.xy,lab.loadGates.x*lab.peak.zw);
+    return c;
+  }
   c.detuning.y = lab.detuning.z;
   if (stage == 1u) {
     c.peak = vec4f((1.0-u)*lab.peak.xy, lab.peak.zw);

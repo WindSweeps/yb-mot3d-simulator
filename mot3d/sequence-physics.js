@@ -2,6 +2,12 @@ import { BEAM_DIRECTIONS, BLUE_TRANSITION, CONSTANTS as C, compile, evaluate, ra
 import { compileSequence, sequenceAt } from './sequence.js';
 import { sequenceSamplingDiagnostics } from './sequence-diagnostics.js';
 import { branchDraws, DARK_BRANCHES, darkRate, GREEN_DECAY_RATE } from './branching.js';
+import { atomTier } from './engines.js';
+import { CASCADE_RATES, ybAtom } from './yb-atom.js';
+import { configureYbField, createYbField, ybRadiation, ybRadiationWorkspace } from './yb-radiation.js';
+import { magneticallyBound, potentialWorkspace } from './yb-potential.js';
+import { integrateMultilevel, multilevelGrid } from './sequence-multilevel.js';
+import { ybLeakRates } from './yb-trajectory.js';
 
 const greenK = 2 * Math.PI / 555.8e-9;
 export const GREEN_TRANSITION = Object.freeze({ k: greenK, gamma: GREEN_DECAY_RATE, lande: 1.5, recoil: C.hbar * greenK / C.mass });
@@ -79,6 +85,13 @@ export function sequenceRadiation(position, velocity, params, channels) {
 
 // 对同一通道状态下的多条轨迹复用光场和工作区，每次返回当前原子的结果。
 export function prepareSequenceRadiation(params, channels, {observeSpectrum = false} = {}) {
+  const tier = atomTier(params.engine);
+  if (tier) {
+    const atom = ybAtom(params.isotope), field = createYbField(compile(params),atom);
+    const s = ybRadiationWorkspace(atom,observeSpectrum);
+    configureYbField(field,{...channels,trap:tier === 3 ? channels.trap : null},channels.absoluteFrequency);
+    return (position,velocity) => ybRadiation(position,velocity,field,s);
+  }
   const field = lightField(compile(params)), s = scratch();
   if (observeSpectrum) s.spectrum = {blue:lineSpectrum(), green:lineSpectrum()};
   configure(field, channels);
@@ -155,13 +168,19 @@ export function prepareSequenceRun(input, config, options = {}) {
   const model = compile(input), field = lightField(model);
   const { n, dtUS } = model.params;
   const program = compileSequence(config);
+  const tier = atomTier(model.params.engine), species = tier ? ybAtom(model.params.isotope) : null;
+  const tracksPerInput = tier >= 2 && program.atom.values.atomLossMode === 'reservoir' &&
+    program.atom.values.leakP2 > 0 ? 1+program.atom.values.p2Branches : 1;
+  const tracks = tracksPerInput*n;
   if (program.durationMS - Math.min(5, dtUS) / 1000 === program.durationMS)
     throw new RangeError('时序末端的浮点时间精度已无法分辨积分步长。');
-  const { grid, loadEnd } = observationGrid(program);
   const observeAtMS = options.observeAtMS;
   if (observeAtMS != null) {
     if (!Number.isFinite(observeAtMS) || observeAtMS < 0 || observeAtMS > program.durationMS)
       throw new RangeError('附加观察时刻须位于当前时序内。');
+  }
+  const {grid,loadEnd} = tier ? multilevelGrid(program,tier,tracks,observeAtMS) : observationGrid(program);
+  if (observeAtMS != null && !tier) {
     // 等待装载的时段沿用捕获云快照。积分时段在指定时刻精确落步，保留原区间的驻留判据。
     if (observeAtMS < loadEnd || observeAtMS > program.stages[0].endMS) {
       const next = grid.findIndex(point => point.time >= observeAtMS);
@@ -169,18 +188,24 @@ export function prepareSequenceRun(input, config, options = {}) {
         grid.splice(next, 0, {time:observeAtMS, windowStart:grid[next].windowStart});
     }
   }
-  const initial = options.initialStates ? Float64Array.from(options.initialStates) : sampleInitialStates(model.params);
-  for (let f = 1; f < grid.length; f++) {
+  const initial = options.initialStates ? Float64Array.from(options.initialStates) : sampleInitialStates(model.params,species?.mass);
+  for (let f = 1; !tier && f < grid.length; f++) {
     const point = grid[f], delta = point.time - grid[f-1].time;
     point.steps = point.freeze ? 0 : Math.max(1, Math.ceil(delta * 1000 / Math.min(5, dtUS) - 1e-8));
     if (!Number.isSafeInteger(point.steps)) throw new RangeError('观察间隔的积分步数超出可精确表示的整数范围。');
   }
   if (initial.length !== n*6 || initial.some(x => !Number.isFinite(x))) throw new RangeError('时序初始相空间尺寸或数值无效。');
   const result = {
-    n, engine:model.params.engine, frameCount:grid.length, stages:program.stages, loadWindowMS:loadEnd,
+    n:tracks, engine:model.params.engine, frameCount:grid.length, stages:program.stages, loadWindowMS:loadEnd,
     timesMS:Float64Array.from(grid, point => point.time),
     metrics:[], summary:{N0:0, N1:0, N2:0},
   };
+  if (tier) {
+    const {leakP0,leakP1,leakP2} = program.atom.values;
+    Object.assign(result,{incidentN:n,isotope:species.isotope,weightedCheckpoints:{},mass:species.mass,
+      emissionBranches:{blue399:1-(leakP0+leakP1+leakP2)/species.blue.gamma,
+        blue556:leakP1/species.blue.gamma,green556:1-CASCADE_RATES.greenP0/species.green.gamma}});
+  }
   // 候选相机曝光只保留窗口内逐原子记录。各帧统计量仍覆盖完整时序。
   if (!options.metricsOnly || options.recordFromMS != null) {
     let first = 0, last = grid.length - 1;
@@ -190,32 +215,43 @@ export function prepareSequenceRun(input, config, options = {}) {
       first = grid.findLastIndex(point => point.time <= options.recordFromMS);
       last = grid.findLastIndex(point => point.time <= observeAtMS);
     }
-    const samples = n * (last - first + 1);
+    const samples = tracks * (last - first + 1);
     Object.assign(result, {firstRecordedFrame:first,
-      checkpointRetained:{N0:new Uint8Array(n), N1:new Uint8Array(n), N2:new Uint8Array(n)},
+      checkpointRetained:{N0:new Uint8Array(tracks), N1:new Uint8Array(tracks), N2:new Uint8Array(tracks)},
       positionsM:new Float32Array(samples * 3), alive:new Uint8Array(samples), trapped:new Uint8Array(samples),
       blueRates:new Float32Array(samples), greenRates:new Float32Array(samples),
     });
+    if (tier) {
+      result.sampleWeights = new Float64Array(samples);
+      result.darkStates = new Uint8Array(samples);
+    }
     if (options.observeVelocity) result.velocitiesMS = new Float32Array(samples * 3);
   }
   // 短装载时捕获检查点也是光场切换点；计算驻留云泄漏率须取装载侧光场。
-  const loadingRadiation = loadEnd === program.stages[0].endMS
+  const loadingRadiation = !tier && loadEnd === program.stages[0].endMS
     ? prepareSequenceRadiation(model.params, sequenceAt(program, 0)) : null;
-  return {model, field, program, grid, loadEnd, loadingRadiation, initial, result};
+  return {model, field, program, grid, loadEnd, loadingRadiation, initial, result,species,tier,tracksPerInput};
 }
 
 function frameMoments(checkpointMask) {
   return {count:0, live:0, retained:0, checkpointMask, dark:[0,0,0,0], rateSum:0, loadRateSum:0,
+    weight:0, squares:0, retainedWeight:0,
     mean:new Float64Array(6), delta:new Float64Array(6), scatter:new Float64Array(36)};
 }
 
-function writeAtom(result, k, pos, offsetP, vel, offsetV, live, trapped, blueRate, greenRate, m, darkChannel, loadingRadiation, retained) {
+function writeAtom(result, k, pos, offsetP, vel, offsetV, live, trapped, blueRate, greenRate, m,
+    darkChannel, loadingRadiation, retained, weight = 1, branchLoss = darkRate(blueRate,greenRate), state = 0) {
   if (retained) {
     m.retained++;
+    m.retainedWeight += weight;
     if (m.checkpointMask) m.checkpointMask[k % result.n] = 1;
   }
   k -= (result.firstRecordedFrame ?? 0) * result.n;
   if (result.positionsM && k >= 0 && k < result.alive.length) {
+    if (result.sampleWeights) {
+      result.sampleWeights[k] = weight;
+      result.darkStates[k] = state;
+    }
     result.positionsM[3*k] = pos[offsetP];
     result.positionsM[3*k+1] = pos[offsetP+1];
     result.positionsM[3*k+2] = pos[offsetP+2];
@@ -236,28 +272,30 @@ function writeAtom(result, k, pos, offsetP, vel, offsetV, live, trapped, blueRat
     return;
   }
   m.live++;
-  if (!trapped) return;
-  m.rateSum += darkRate(blueRate, greenRate);
+  if (!trapped || weight === 0) return;
+  m.rateSum += weight*branchLoss;
   if (loadingRadiation) {
     const radiation = loadingRadiation(pos.subarray(offsetP,offsetP+3), vel.subarray(offsetV,offsetV+3));
     m.loadRateSum += darkRate(radiation.blueRate, radiation.greenRate);
   }
-  const count = ++m.count;
+  m.count++;
+  const oldWeight = m.weight;
+  m.weight += weight;
+  m.squares += weight*weight;
   for (let axis = 0; axis < 3; axis++) {
     m.delta[axis] = pos[offsetP + axis] - m.mean[axis];
     m.delta[axis + 3] = vel[offsetV + axis] - m.mean[axis + 3];
   }
   // Welford 更新中心二阶矩，六个分量依次为位置（m）和速度（m/s）。
-  const correction = (count - 1) / count;
+  const correction = weight*(oldWeight/m.weight), update = weight/m.weight;
   for (let row = 0; row < 6; row++) {
-    m.mean[row] += m.delta[row] / count;
+    m.mean[row] += m.delta[row] * update;
     const correctedDelta = m.delta[row] * correction;
     for (let col = 0; col <= row; col++) m.scatter[6*row + col] += correctedDelta * m.delta[col];
   }
 }
 
-function phaseSpaceDensityPerAtom(count, scatter) {
-  if (count < 7) return null;
+function phaseSpaceDensityPerAtom(denominator, scatter, mass) {
   // 先消去各分量的量纲，再对相关矩阵作 Cholesky 分解。
   const scales = new Float64Array(6), lower = new Float64Array(36);
   let volume = 1;
@@ -270,38 +308,41 @@ function phaseSpaceDensityPerAtom(count, scatter) {
       if (row === col) {
         if (!(pivot > 36 * Number.EPSILON)) return null;
         lower[7*row] = Math.sqrt(pivot);
-        volume *= lower[7*row] * (scales[row] / Math.sqrt(count - 1));
+        volume *= lower[7*row] * (scales[row] / Math.sqrt(denominator));
       } else {
         lower[6*row + col] = pivot / lower[7*col];
       }
     }
   }
-  const density = (C.hbar / C.mass)**3 / volume;
+  const density = (C.hbar / mass)**3 / volume;
   return Number.isFinite(density) ? density : null;
 }
 
-function finishFrame(run, frame, m) {
-  const {count, mean, scatter} = m, checkpoint = run.grid[frame].checkpoint;
+function finishFrame(run, frame, m, ledger) {
+  const {count, mean, scatter, weight, squares} = m, checkpoint = run.grid[frame].checkpoint;
+  const mass = run.species?.mass ?? C.mass;
   if (checkpoint) run.result.summary[checkpoint] = m.retained;
-  const branchLossRate = count ? m.rateSum / count : 0;
+  const branchLossRate = weight ? m.rateSum / weight : 0;
   if (checkpoint === 'N0')
     run.result.loadBranchLossRate = run.loadingRadiation && count ? m.loadRateSum / count : branchLossRate;
   const width = scatter[0] + scatter[7] + scatter[14];
   const thermal = scatter[21] + scatter[28] + scatter[35];
+  const denominator = weight ? weight-squares/weight : 0;
   let sampleCovariance = null;
-  if (count > 1) {
+  if (denominator > 0) {
     sampleCovariance = new Float64Array(21);
     let entry = 0;
     for (let row = 0; row < 6; row++) for (let col = 0; col <= row; col++)
-      sampleCovariance[entry++] = scatter[6*row + col] / (count - 1);
+      sampleCovariance[entry++] = scatter[6*row + col] / denominator;
   }
   run.result.metrics.push({
     count, branchLossRate, darkBranches:{blueP0:m.dark[1], blueP2:m.dark[2], greenP0:m.dark[3]},
     centroidMM:count ? [1000*mean[0], 1000*mean[1], 1000*mean[2]] : null,
     meanVelocityMS:count ? [mean[3],mean[4],mean[5]] : null, sampleCovariance,
-    rmsRadiusMM:count ? 1000*Math.sqrt(width/count) : null,
-    temperatureUK:count > 1 ? C.mass*Math.max(0,thermal)*1e6/(3*C.kB*(count-1)) : null,
-    psdPerAtom:phaseSpaceDensityPerAtom(count, scatter),
+    rmsRadiusMM:count ? 1000*Math.sqrt(width/weight) : null,
+    temperatureUK:denominator > 0 ? mass*Math.max(0,thermal)*1e6/(3*C.kB*denominator) : null,
+    psdPerAtom:(ledger?.brightESS ?? count) >= 7 ? phaseSpaceDensityPerAtom(denominator,scatter,mass) : null,
+    ...(ledger && {ledger,covarianceToPopulation:weight ? denominator/weight : 0}),
   });
 }
 
@@ -338,6 +379,7 @@ export function writeSequenceGPUFrames(run, data, firstFrame, frameCount) {
 
 export function finishSequenceRun(run, started) {
   if (run.result.metrics.length !== run.result.frameCount) throw new Error('时序输出帧不完整。');
+  if (run.tier) return finishMultilevelRun(run,started);
   run.result.samplingDiagnostics = sequenceSamplingDiagnostics(run.result.n, run.result.summary);
   run.result.samplingDiagnostics.branchProbabilities = DARK_BRANCHES;
   run.result.samplingDiagnostics.loadBranchLossRate = run.result.loadBranchLossRate;
@@ -348,8 +390,78 @@ export function finishSequenceRun(run, started) {
   return Object.assign(run.result, run.result.summary, {elapsedMS:performance.now()-started});
 }
 
+function effectiveSize(weights,total) {
+  if (!total) return 0;
+  let squares = 0;
+  for (const weight of weights) squares += weight*weight;
+  return total*total/squares;
+}
+
+function finishMultilevelRun(run,started) {
+  const {result} = run;
+  const stages = {};
+  for (const [index,point] of run.grid.entries()) if (point.checkpoint) {
+    const id = point.checkpoint, ledger = result.metrics[index].ledger, weight = result.weightedCheckpoints[id];
+    stages[id] = {captured:result.summary[id],capturedWeight:weight,fractionOfInput:weight/result.incidentN,
+      brightESS:ledger.brightESS,magneticESS:ledger.magneticESS,ledger};
+  }
+  const last = result.metrics.at(-1).ledger;
+  result.samplingDiagnostics = {
+    method:'yb-multilevel',isotope:result.isotope,incident:result.incidentN,
+    weightBasis:'每个入射样本权重为 1，子轨迹的有效样本数按共同的入射样本合计。',
+    sourceMassPerSample:result.sourceMassPerSample,
+    peakMagneticESS:Math.max(...result.metrics.map(frame => frame.ledger.magneticESS)),
+    integrationSteps:result.integrationSteps,greenEvents:last.greenEvents,stages,
+  };
+  return Object.assign(result,result.summary,{elapsedMS:performance.now()-started});
+}
+
+function simulateMultilevel(run,options,started) {
+  const {result,species,grid} = run, n = result.incidentN;
+  const radiation = ybRadiationWorkspace(species), potential = potentialWorkspace(), rates = new Float64Array(4);
+  const bright = new Float64Array(n), magnetic = new Float64Array(n);
+  integrateMultilevel(run,options,inside,domain,(frame,atoms,field,ledger) => {
+    const {checkpoint,windowStart} = grid[frame], m = frameMoments(result.checkpointRetained?.[checkpoint]);
+    Object.assign(ledger,{bright:0, p0:0, p2Free:0, p2Magnetic:0});
+    bright.fill(0); magnetic.fill(0);
+    for (const atom of atoms) {
+      const {p,v,state,slot,i,weight} = atom;
+      let darkState = 0, rb = 0, rg = 0, loss = 0, trapped = false;
+      if (state) {
+        if (state.kind === 'p0') { darkState = 1; ledger.p0 += weight; }
+        else if (magneticallyBound(p,v,field,species,state,domain,potential)) {
+          darkState = 2;
+          ledger.p2Magnetic += weight;
+          magnetic[i] += weight;
+        } else { darkState = 3; ledger.p2Free += weight; }
+      } else {
+        ledger.bright += weight;
+        trapped = inside(p,v);
+        if (trapped) bright[i] += weight;
+        ybRadiation(p,v,field,radiation);
+        rb = radiation.blueRate; rg = radiation.greenRate;
+        loss = ybLeakRates(radiation,field,run.program.atom.values,rates);
+      }
+      const retained = checkpoint && trapped && atom.lastOutside <= windowStart+1e-9;
+      writeAtom(result,frame*result.n+slot,p,0,v,0,!state,trapped,rb,rg,m,0,null,retained,weight,loss,darkState);
+    }
+    m.dark[1] = ledger.shelved[0]; m.dark[2] = ledger.shelved[2]; m.dark[3] = ledger.shelved[3];
+    const total = ledger.pending+ledger.bright+ledger.p0+ledger.p2Free+ledger.p2Magnetic+
+      ledger.escapeBright+ledger.escapeDark+ledger.background+ledger.collision+ledger.radiative;
+    ledger.residual = total-n;
+    if (Math.abs(ledger.residual) > 1e-8*n) throw new Error('镱原子权重收支未闭合。');
+    ledger.trappedBright = m.weight;
+    ledger.brightESS = effectiveSize(bright,m.weight);
+    ledger.magneticESS = effectiveSize(magnetic,ledger.p2Magnetic);
+    if (checkpoint) result.weightedCheckpoints[checkpoint] = m.retainedWeight;
+    finishFrame(run,frame,m,ledger);
+  });
+  return finishSequenceRun(run,started);
+}
+
 export function simulateSequence(input, config, options = {}) {
   const start = performance.now(), run = prepareSequenceRun(input,config,options);
+  if (run.tier) return simulateMultilevel(run,options,start);
   const {model, program, grid, initial, result} = run;
   const {n, seed} = model.params;
   const atoms = Array.from({ length:n }, (_, i) => atomFrom(initial, i, seed));

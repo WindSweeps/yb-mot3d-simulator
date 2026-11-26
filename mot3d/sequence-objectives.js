@@ -4,6 +4,7 @@ import { IMAGING_DEFAULTS } from './sequence-imaging.js';
 import { sequenceObservation } from './sequence-observation.js';
 import { opticalObjectives } from './sequence-optical-objectives.js';
 import { cloudObjectives } from './sequence-cloud-objectives.js';
+import { atomTier } from './engines.js';
 
 const sum = values => values.reduce((a, b) => a + b, 0);
 const percent = (a, b) => b > 0 ? 100 * (a / b) : null;
@@ -11,7 +12,8 @@ const axes = ['X', 'Y', 'Z'];
 
 function objectiveList(experiment, program) {
   const list = [], blueOnly = program.config.mode === 'blue-only';
-  const calibrated = Math.min(20, program.stages[0].endMS);
+  const tier = atomTier(experiment.params?.engine);
+  const calibrated = tier ? program.stages[0].endMS : Math.min(20,program.stages[0].endMS);
   let group = '原子云';
   function add(id, label, unit, read, options = {}) {
     list.push({id, label, unit, group, read, ...options});
@@ -50,10 +52,11 @@ function objectiveList(experiment, program) {
 
   group = '装载与损失';
   add('sourceFlux', '当前入射原子通量', '原子/s', c => c.channels.stageId === 'load' ? experiment.loading.flux : 0);
-  add('loadingRate', '装载率 Φp', '原子/s', c => c.population.loadingRate, {availableFromMS:calibrated});
-  add('steadyState', '装载稳态原子数', '原子', c => c.population.steadyState, {availableFromMS:calibrated});
-  add('loadingTauMS', '装载时间常数 τ（稳态的 63.2%）', 'ms', c => c.population.timeConstants().loading.timeMS,
-    {availableFromMS:calibrated});
+  add('loadingRate',tier ? '首次达到驻留条件的平均速率' : '装载率 Φp','原子/s',c => c.population.loadingRate,{availableFromMS:calibrated});
+  if (!tier) {
+    add('steadyState','装载稳态原子数','原子',c => c.population.steadyState,{availableFromMS:calibrated});
+    add('loadingTauMS','装载时间常数 τ（稳态的 63.2%）','ms',c => c.population.timeConstants().loading.timeMS,{availableFromMS:calibrated});
+  }
   add('lossTauMS', '损失时间常数 τ（已降至关源时的 1/e）', 'ms', c => {
     const loss = c.population.timeConstants().loss;
     return loss.status === 'reached' && c.timeMS >= program.stages[0].endMS + loss.timeMS ? loss.timeMS : null;
@@ -67,6 +70,14 @@ function objectiveList(experiment, program) {
   add('beta', '当前阶段有效双体损失系数 β', '(原子·s)⁻¹', c => c.loss.beta);
   add('oneBodyLoss', '单体损失速率 αN', '原子/s', c => c.loss.alpha * c.atoms);
   add('twoBodyLoss', '双体损失速率 βN²', '原子/s', c => c.loss.beta * c.atoms ** 2);
+  if (tier >= 2) {
+    group = '暗态与重泵浦';
+    add('dark.magnetic','磁阱 ³P₂ 原子数','原子',c => c.cloud.ledger.p2Magnetic*c.result.sourceMassPerSample);
+    add('dark.free','未磁束缚暗态原子数','原子',c =>
+      (c.cloud.ledger.p0+c.cloud.ledger.p2Free)*c.result.sourceMassPerSample);
+    add('dark.recovered','重泵浦累计回流','原子',c => c.cloud.ledger.recovered*c.result.sourceMassPerSample);
+    add('dark.effective','磁阱有效样本量','',c => c.cloud.ledger.magneticESS);
+  }
 
   group = '阶段检查点';
   const labels = ['装载结束 N₀', blueOnly ? '中点驻留 N₁' : '纯绿接收结束 N₁', blueOnly ? '末端驻留 N₂' : '压缩结束 N₂'];
@@ -76,8 +87,13 @@ function objectiveList(experiment, program) {
     add(key + '.count', label + ' · 留存轨迹数', '条', c => c.result.summary[key], when);
     add(key + '.efficiency', label + (i ? ' · 相对上一检查点原子数' : ' · 入射轨迹捕获效率'), '%', c =>
       i ? percent(c.population.estimatedAtoms[key], c.population.estimatedAtoms['N' + (i-1)])
-        : percent(c.result.summary.N0, c.result.n), when);
+        : tier ? percent(c.result.weightedCheckpoints.N0,c.result.incidentN) : percent(c.result.summary.N0,c.result.n),when);
     const diagnostics = c => c.result.samplingDiagnostics.stages[key];
+    if (tier) {
+      add(key+'.fromSource.fraction',label+' · 入射样本权重的留存比例','%',
+        c => 100*diagnostics(c).fractionOfInput,when);
+      continue;
+    }
     for (const [id, text] of [['fromPrevious','相对进入本段轨迹'], ['fromSource','相对入射轨迹']]) {
       add(key + '.' + id + '.fraction', label + ' · ' + text + '的留存率', '%', c => {
         const value = diagnostics(c)[id].fraction;

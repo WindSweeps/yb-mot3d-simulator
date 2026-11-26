@@ -90,3 +90,12 @@
   .seq-ruler-row,.seq-lane { grid-template-columns:68px minmax(0,1fr) 67px; }
   .seq-time-input input { width:66px; }
 }
+.seq-atom-controls {
+  margin: 12px 20px;
+  color: var(--text);
+  font: 500 var(--meta)/1.5 var(--sans);
+}
+.seq-atom-controls summary { cursor: pointer; }
+.seq-atom-group { min-width: 0; margin: 9px 0; border: 1px solid var(--line); padding: 8px; }
+.seq-atom-group .seq-fields { margin-top: 0; }
+.seq-lane[hidden] { display: none; }

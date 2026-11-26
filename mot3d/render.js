@@ -363,7 +363,11 @@ export function mountScene(container) {
     groups.sequenceBeams.visible = sequence && layers.beams;
     groups.sequenceAtoms.visible = sequence;
     groups.sequenceTrails.visible = sequence && layers.trails;
-    if (sequenceRender) sequenceRender.cloud.material.uniforms.fluorescence.value = layers.fluorescence;
+    if (sequenceRender) {
+      const uniforms = sequenceRender.cloud.material.uniforms;
+      uniforms.fluorescence.value = layers.fluorescence;
+      uniforms.showDark.value = layers.metastable ?? true;
+    }
     groups.densityScale.visible = !sequence && activeView === 'cloud';
     const lockedOnField = sequence && activeView === 'cloud';
     groups.sequenceScale.visible = lockedOnField;

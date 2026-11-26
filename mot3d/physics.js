@@ -1,5 +1,5 @@
 import { BLUE_DECAY_RATE, DARK_BRANCHES, EMISSION_BRANCHES, branchDraws } from './branching.js';
-import { defaultEngine, validateEngine } from './engines.js';
+import { atomTier, defaultEngine, validateEngine } from './engines.js';
 
 /** 174Yb J=0 -> J'=1, six travelling waves; SI internally. See METHOD.md. */
 export const CONSTANTS = Object.freeze({
@@ -40,7 +40,7 @@ export const DEFAULTS = Object.freeze({
 
 function normalize(input = {}) {
   const p = { ...DEFAULTS, ...input };
-  validateEngine(p.engine);
+  if (!atomTier(p.engine)) validateEngine(p.engine);
   for (const [key, len] of [['powersMW', 6], ['biasCurrentA', 3], ['biasPerAmp', 3]]) {
     if (!Array.isArray(p[key]) || p[key].length !== len || p[key].some(v => !Number.isFinite(v)))
       throw new TypeError(`${key} requires ${len} finite numbers`);
@@ -167,6 +167,7 @@ export function evaluate(x, y, z, vx, vy, vz, c, out, s, transition = BLUE_TRANS
 
 export function radiation(pos, vel, paramsOrCompiled = {}) {
   const c = compile(paramsOrCompiled), out = new Float64Array(9);
+  validateEngine(c.params.engine);
   evaluate(...pos, ...vel, c, out, new Float64Array(6));
   return { acceleration: Array.from(out.subarray(0, 3)), rates: Array.from(out.subarray(3)),
     totalRate: out.subarray(3).reduce((a, b) => a + b, 0) };
@@ -195,14 +196,14 @@ export function random(seed) {
   } };
 }
 
-export function sampleInitialStates(input = {}) {
+export function sampleInitialStates(input = {}, mass = C.mass) {
   const p = normalize(input);
   const rng = random(p.seed), states = new Float64Array(p.n * 6);
   const yaw = p.sourceYawDeg * Math.PI/180, pitch = p.sourcePitchDeg * Math.PI/180;
   const d = [Math.cos(yaw)*Math.cos(pitch), Math.sin(yaw)*Math.cos(pitch), Math.sin(pitch)];
   const e1 = [-Math.sin(yaw), Math.cos(yaw), 0];
   const e2 = [-Math.cos(yaw)*Math.sin(pitch), -Math.sin(yaw)*Math.sin(pitch), Math.cos(pitch)];
-  const thermal = Math.sqrt(C.kB * p.sourceTempMK * 1e-3 / C.mass);
+  const thermal = Math.sqrt(C.kB * p.sourceTempMK * 1e-3 / mass);
   for (let i = 0; i < p.n; i++) {
     const o = i*6;
     states[o] = -p.sourceDistanceMM * 1e-3;
@@ -220,6 +221,7 @@ export function sampleInitialStates(input = {}) {
 /** options.initialStates: optional flat [x,y,z,vx,vy,vz] per atom, SI, for controlled tests. */
 export function simulate(input = {}, options = {}) {
   const started = performance.now(), c = compile(input), p = c.params, n = p.n;
+  validateEngine(p.engine);
   const frameCount = options.frameCount ?? 120;
   if (!Number.isInteger(frameCount) || frameCount < 2 || frameCount > 1000) throw new RangeError('Invalid frameCount');
   const initial = options.initialStates ? Float64Array.from(options.initialStates) : sampleInitialStates(p);

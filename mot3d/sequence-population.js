@@ -1,4 +1,5 @@
 import { sequenceAt } from './sequence.js';
+import { sequenceFrameAt } from './sequence-exposure.js';
 
 // Li 等表 II 给出总单体损失和双体损失，β 的单位为每原子每秒。
 const lossRates = {
@@ -139,6 +140,7 @@ function lossTimeConstant(intervals, timesMS, endMS, finalWeight, finalCount, lo
 }
 
 export function sequencePopulation(program, result, settings) {
+  if (result.incidentN !== undefined) return multilevelPopulation(program,result,settings);
   const {n: incident, summary: {N0: captured, N1, N2}, timesMS, metrics} = result;
   const {flux} = settings;
   if (!Number.isInteger(incident) || incident < 1 || !Number.isInteger(captured) || captured < 0 || captured > incident)
@@ -200,4 +202,32 @@ export function sequencePopulation(program, result, settings) {
   }
   return {at, weightAt, loaded, timeConstants, loadingRate, steadyState, lossAt,
     estimatedAtoms: {N0:loaded, N1:at(program.checkpointTimesMS[1], N1), N2:finalWeight * N2}};
+}
+
+function multilevelPopulation(program,result,settings) {
+  const {timesMS,metrics,sourceMassPerSample:scale,weightedCheckpoints} = result;
+  const shutoff = program.stages[0].endMS, index = timesMS.indexOf(shutoff);
+  const losses = sequenceLossStages(program,settings), population = frame => scale*metrics[frame].ledger.trappedBright;
+  const loaded = population(index);
+  const estimatedAtoms = Object.fromEntries(Object.entries(weightedCheckpoints).map(([key,w]) => [key,w*scale]));
+  const loadingRate = scale*metrics[index].ledger.firstCapture/(shutoff/1000);
+  function at(timeMS) {
+    if (!Number.isFinite(timeMS) || timeMS < 0) throw new RangeError('时序时间必须为有限的非负数。');
+    return population(sequenceFrameAt(timesMS,timeMS));
+  }
+  function timeConstants() {
+    const loading = {status:loadingRate ? 'sampled-loading' : 'empty',timeMS:null};
+    let loss = {status:'empty',timeMS:null};
+    if (loaded > 0) {
+      let crossing = index+1;
+      while (crossing < timesMS.length && population(crossing) > loaded/Math.E) crossing++;
+      loss = crossing === timesMS.length ? {status:'lower-bound',timeMS:program.durationMS-shutoff} :
+        {status:'reached',timeMS:timesMS[crossing]-shutoff,
+          bracketMS:[timesMS[crossing-1]-shutoff,timesMS[crossing]-shutoff]};
+    }
+    return {loading,loss};
+  }
+  return {at,weightAt:(timeMS,count) => count > 0 ? at(timeMS)/count : 0,loaded,timeConstants,loadingRate,
+    steadyState:null,estimatedAtoms,
+    lossAt:(stage,frame) => effectiveLoss(losses[stage],metrics[frame].branchLossRate)};
 }

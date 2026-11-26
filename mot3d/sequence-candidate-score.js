@@ -7,6 +7,7 @@ import { cloudReadout } from './sequence-observation.js';
 import { simulateSequence } from './sequence-physics.js';
 import { createSequenceGpu, SequenceDeviceUnavailable } from './sequence-gpu.js';
 import { findSequenceObjective, objectiveSampling, scoreSequenceObjective } from './sequence-objectives.js';
+import { atomTier } from './engines.js';
 
 // 原子数在指定时间计算，云团矩取目标帧。装载等待期复用已积分的捕获云。
 export function candidateObservation(program, result, loading, timeMS) {
@@ -18,7 +19,7 @@ export async function createCandidateScorer({params, loading, imaging, shader, t
   if (!Number.isFinite(timeMS) || timeMS < 0) throw new RangeError('目标时间须为有限的非负数。');
   if (typeof metric !== 'string' || !metric) throw new RangeError('未选择优化目标。');
   let gpu;
-  if (shader) {
+  if (shader && !atomTier(params?.engine)) {
     try { gpu = await createSequenceGpu(shader); }
     catch (error) { if (!(error instanceof SequenceDeviceUnavailable)) throw error; }
   }
@@ -41,8 +42,10 @@ export async function createCandidateScorer({params, loading, imaging, shader, t
       }
       knownObjective = true;
       const options = objectiveSampling(objective, experiment.imaging, timeMS);
-      const result = gpu ? await gpu.run(experiment.params, config, options) : simulateSequence(experiment.params, config, options);
-      return {...scoreSequenceObjective(objective, experiment, program, result, timeMS), backend};
+      const useGpu = gpu && !atomTier(experiment.params.engine);
+      const result = useGpu ? await gpu.run(experiment.params,config,options) :
+        simulateSequence(experiment.params,config,{...options,loading:experiment.loading});
+      return {...scoreSequenceObjective(objective,experiment,program,result,timeMS),backend:useGpu ? 'WebGPU' : 'CPU'};
     },
     destroy() { gpu?.destroy(); },
   };

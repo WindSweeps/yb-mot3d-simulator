@@ -10,8 +10,9 @@ import { IMAGING_DEFAULTS } from './sequence-imaging.js';
 import { mountSequenceDock } from './sequence-dock.js';
 import { mountSequenceCurves } from './sequence-curves.js';
 import { mountSequenceOptimization } from './sequence-optimization.js';
-import { availableEngines, defaultEngine } from './engines.js';
+import { atomTier, availableSequenceEngines, defaultEngine, sequenceDefaultEngine } from './engines.js';
 import { mountEnginePanel } from './engine-panel.js';
+import { DEFAULT_ISOTOPE, YB_ISOTOPES, ybAtom } from './yb-atom.js';
 
 // 时序与求解器持续更新同一组控件，停靠过程可以移动它们的父节点。
 const elements = new Map(Array.from(document.querySelectorAll('[id]'), el => ['#' + el.id, el]));
@@ -36,6 +37,8 @@ function scientificCount(value) {
 const computeShader = $('#sequence-compute').textContent;
 const requestedPreset = new URLSearchParams(location.search).get('preset');
 const initialPreset = SEQUENCE_PRESETS.find(preset => preset.id === requestedPreset) ?? SEQUENCE_PRESETS[0];
+let legacySampleCount, autoSampleCount = true;
+let presetEngine;
 let params = await initialInputs(), program = compileSequence(initialPreset.config), timeMS = 0;
 let simulation = simulationType(program);
 let geometry = derive(params);
@@ -54,8 +57,10 @@ async function initialInputs() {
   const base = { ...DEFAULTS, ...previous };
   // 时序页单独设置采样数；实验文件导入时使用文件中明确保存的数量。
   const adapter = await navigator.gpu?.requestAdapter().catch(() => null);
-  const n = adapter ? (matchMedia('(max-width: 800px)').matches ? 4096 : 16384) : 1024;
-  return { ...base, engine:base.engine ?? defaultEngine, n, greenWaistMM: base.waistMM };
+  legacySampleCount = adapter ? (matchMedia('(max-width: 800px)').matches ? 4096 : 16384) : 1024;
+  const engine = initialPreset.engine ??
+    (initialPreset.config.mode === 'blue-only' ? sequenceDefaultEngine('blue-only') : base.engine ?? defaultEngine);
+  return { ...base, engine, isotope:DEFAULT_ISOTOPE, n:atomTier(engine) ? 192 : legacySampleCount, greenWaistMM:base.waistMM };
 }
 
 function fillLoadingInputs() {
@@ -92,10 +97,21 @@ function showReferenceLoss() {
     beta.placeholder = String(stage.beta);
   }
   const blueOnly = program.config.mode === 'blue-only';
-  const heading = blueOnly ? '纯蓝 MOT 实验时序' : '双色 MOT 实验时序';
+  const heading = blueOnly ? '纯蓝 MOT 实验时序' : program.config.greenDuringLoad === false ?
+    '399 → 556 nm MOT 实验时序' : '双色 MOT 实验时序';
   $('#sequence-heading').textContent = heading;
   document.title = 'Yb · ' + heading;
-  $('#sequence-wavelengths').textContent = blueOnly ? '¹⁷⁴Yb · 399 nm' : '¹⁷⁴Yb · 399 nm / 556 nm';
+  const tier = atomTier(params.engine);
+  const isotope = tier ? params.isotope ?? DEFAULT_ISOTOPE : DEFAULT_ISOTOPE;
+  const isotopeName = isotope.slice(0,3).replace(/\d/g,digit => '⁰¹²³⁴⁵⁶⁷⁸⁹'[digit]) + 'Yb';
+  $('#sequence-wavelengths').textContent = isotopeName + (blueOnly ? ' · 399 nm' : ' · 399 nm / 556 nm');
+  $('#seq-atom-ledger').hidden = $('#seq-dark-layer').hidden = tier < 2 || program.atom.values.atomLossMode === 'lifetime';
+  $('#seq-loading-method').textContent = tier
+    ? '按入射时刻推进每条轨迹。光学跃迁改变内态，背景与双体损失改变轨迹权重。'
+    : '装载率为入射通量 Φ 乘以亮态捕获概率 p。持续装载期间，模型按捕获云的平均散射率计算暗态损失。';
+  $('#seq-tau-loading-definition').textContent = tier
+    ? '装载曲线来自时序内的入射和留存轨迹。'
+    : '从开始装载到原子数达到模型稳态值的 63.2%。';
   $('#seq-green-branch').hidden = simulation === 'blue';
   checkpointButtons[1].textContent = blueOnly ? '中点驻留 N₁' : '纯绿接收 N₁';
   checkpointButtons[2].textContent = blueOnly ? '末端驻留 N₂' : '压缩结束 N₂';
@@ -130,7 +146,7 @@ function refreshCurves() {
     const crossing = constants.loss.status === 'reached' ? end + constants.loss.timeMS : null;
     for (const [frame, time] of result.timesMS.entries()) {
       // 关源后，帧内权重连续演化，阱内轨迹数只在下一帧更新。
-      if (frame > 0 && time > end) {
+      if (frame > 0 && (result.incidentN !== undefined || time > end)) {
         if (crossing > result.timesMS[frame - 1] && crossing < time)
           points.push(cloudReadout(program, result, population, crossing, frame - 1));
         const before = cloudReadout(program, result, population, time, frame - 1);
@@ -158,7 +174,8 @@ function summarize() {
     $('#seq-' + suffix).textContent = counts?.[key] ?? blank;
     showAtoms($('#seq-atoms-' + suffix), atoms?.[key]);
   }
-  $('#seq-e0').textContent = efficiency(counts?.N0, result?.n);
+  $('#seq-e0').textContent = result?.incidentN === undefined ? efficiency(counts?.N0,result?.n) :
+    efficiency(result.weightedCheckpoints.N0,result.incidentN);
   $('#seq-e1').textContent = efficiency(atoms?.N1, atoms?.N0);
   $('#seq-e2').textContent = efficiency(atoms?.N2, atoms?.N1);
   $('#seq-transfer').textContent = efficiency(atoms?.N2, atoms?.N0);
@@ -182,6 +199,8 @@ function showFrame(t) {
       positionsM:result.positionsM.subarray(3 * start, 3 * end),
       alive:result.alive.subarray(start, end), blueRates:result.blueRates.subarray(start, end),
       greenRates:result.greenRates.subarray(start, end),
+      darkStates:result.darkStates?.subarray(start,end), sampleWeights:result.sampleWeights?.subarray(start,end),
+      incidentN:result.incidentN,emissionBranches:result.emissionBranches,
     });
     if (f > 0 && timeMS - result.timesMS[f] <= .5) {
       sample.previousPositionsM = result.positionsM.subarray(3 * (start - result.n), 3 * start);
@@ -192,9 +211,14 @@ function showFrame(t) {
   scene?.setSequenceFrame({ ...sample, loadingSource: result });
   imaging.setFrame(point.cameraFrame());
   $('#seq-count').textContent = metric?.count ?? blank;
-  $('#seq-blue-p0').textContent = metric?.darkBranches.blueP0 ?? blank;
-  $('#seq-blue-p2').textContent = metric?.darkBranches.blueP2 ?? blank;
-  $('#seq-green-p0').textContent = metric?.darkBranches.greenP0 ?? blank;
+  for (const [id,key] of [['blue-p0','blueP0'],['blue-p2','blueP2'],['green-p0','greenP0']])
+    $('#seq-'+id).textContent = numberOrBlank(metric?.darkBranches[key],3);
+  const ledger = metric?.ledger, scale = result?.sourceMassPerSample;
+  showAtoms($('#seq-magnetic-atoms'),ledger && scale*ledger.p2Magnetic);
+  showAtoms($('#seq-free-dark-atoms'),ledger && scale*(ledger.p2Free+ledger.p0));
+  showAtoms($('#seq-repumped-atoms'),ledger && scale*ledger.recovered);
+  $('#seq-dark-ess').textContent = ledger ?
+    '磁阱有效样本量 '+numberOrBlank(ledger.magneticESS,1)+(ledger.magneticESS < 200 ? '（低于 200）' : '') : '';
   $('#seq-temperature').textContent = numberOrBlank(metric?.temperatureUK, 1);
   $('#seq-radius').textContent = numberOrBlank(metric?.rmsRadiusMM, 3);
   curves.setCursor(timeMS, count, psd);
@@ -202,7 +226,9 @@ function showFrame(t) {
   $('#seq-scene-population').textContent = Number.isFinite(count) ? '估计阱内 ' + scientificCount(count) + ' 个原子' : '';
   const windowMS = Math.min(20, program.stages[0].durationMS);
   const onPlateau = timeMS <= program.stages[0].endMS && timeMS > windowMS;
-  $('#seq-window-note').textContent = onPlateau
+  $('#seq-window-note').textContent = atomTier(params.engine)
+    ? '累计暗态跃迁按入射样本权重计。阱内亮态取 r < 3 mm、速率 < 1 m/s 的样本。阶段末另检查持续驻留。'
+    : onPlateau
     ? '装载等待段使用 ' + windowMS + ' ms 的捕获云快照。轨迹图层用入射样本示意连续装载，亮纹沿飞行方向移动。'
     : '入射样本 ' + params.n + ' 个，装载轨迹积分 ' + windowMS + ' ms。当前读数取 r < 3 mm、速率 < 1 m/s 的样本，阶段末留存还要求在末段持续满足两项条件。';
 }
@@ -213,17 +239,46 @@ function simulationType(compiled) {
 }
 
 const enginePanel = mountEnginePanel($('#sequence-engine'), {
-  simulation, engine:params.engine,
+  simulation, engine:params.engine, enginesFor:availableSequenceEngines,
   onSelect(engine) {
     params = {...params, engine};
+    useEngineSampleCount();
+    if (editor.setAtomTier(atomTier(engine))) editValid = true;
+    showIsotope();
     recalculate();
   },
+});
+const isotopeRow = document.createElement('label'), isotopeControl = document.createElement('select');
+const isotopeLines = document.createElement('p');
+isotopeRow.className = 'engine-isotope';
+isotopeLines.className = 'engine-isotope-lines';
+isotopeRow.append('同位素',isotopeControl);
+for (const isotope of YB_ISOTOPES) isotopeControl.add(new Option(isotope,isotope));
+$('#sequence-engine').querySelector('.engine-picker').after(isotopeRow,isotopeLines);
+function showIsotope() {
+  isotopeRow.hidden = !atomTier(params.engine);
+  isotopeControl.value = params.isotope ?? DEFAULT_ISOTOPE;
+  isotopeLines.hidden = isotopeRow.hidden || isotopeControl.value === DEFAULT_ISOTOPE;
+  const {blue,green} = ybAtom(isotopeControl.value);
+  const signed = x => (x >= 0 ? '+' : '−')+Math.abs(x).toFixed(3)+' MHz';
+  isotopeLines.textContent = '相对 ¹⁷⁴Yb 的主冷却线频移 · 399 nm '+signed(blue.referenceMHz)+' · 556 nm '+signed(green.referenceMHz);
+}
+function useEngineSampleCount() {
+  if (!autoSampleCount) return;
+  params.n = atomTier(params.engine) ? 192 : legacySampleCount;
+  $('#sequence-sample-count').value = String(params.n);
+}
+isotopeControl.addEventListener('change',() => {
+  params.isotope = isotopeControl.value;
+  showIsotope();
+  recalculate();
 });
 const curves = mountSequenceCurves($('#sequence-curves'), t => { editor.pause(); editor.setTime(t); });
 const editor = mountSequenceEditor($('#sequence-editor'), {
   initialPreset,
   onPreset(id) {
     if (!suspended) enginePanel.update({simulation, engine:params.engine});
+    presetEngine = !suspended ? SEQUENCE_PRESETS.find(preset => preset.id === id)?.engine : undefined;
     observeAtMS = id === 'imported' ? importedObserveAtMS : undefined;
     const url = new URL(location.href);
     if (id === 'imported') url.searchParams.delete('preset');
@@ -243,10 +298,17 @@ const editor = mountSequenceEditor($('#sequence-editor'), {
       fillLoadingInputs();
     }
     const nextSimulation = simulationType(compiled);
-    if (!suspended && simulation !== nextSimulation) {
+    if (!suspended && (simulation !== nextSimulation || presetEngine)) {
       engineBySimulation.set(simulation, params.engine);
-      params = {...params, engine:engineBySimulation.get(nextSimulation) ?? defaultEngine};
+      const sameMode = program.config.mode === compiled.config.mode;
+      const engine = presetEngine ?? (sameMode && atomTier(params.engine) ? params.engine :
+        engineBySimulation.get(nextSimulation) ?? sequenceDefaultEngine(compiled.config.mode));
+      params = {...params,engine};
+      presetEngine = undefined;
+      useEngineSampleCount();
       enginePanel.update({simulation:nextSimulation, engine:params.engine});
+      editor.setAtomTier(atomTier(params.engine));
+      showIsotope();
     }
     simulation = nextSimulation;
     program = compiled;
@@ -259,6 +321,9 @@ const editor = mountSequenceEditor($('#sequence-editor'), {
     status(message);
   },
 });
+
+editor.setAtomTier(atomTier(params.engine));
+showIsotope();
 
 const optimization = mountSequenceOptimization($('#sequence-optimizer'), {
   getCursor:() => timeMS,
@@ -301,6 +366,7 @@ function loadExperiment(experiment, preset, targetMS) {
     loadingByMode.set(program.config.mode, loading);
     engineBySimulation.set(simulation, params.engine);
     params = structuredClone(experiment.params);
+    autoSampleCount = false;
     loading = {...experiment.loading};
     fillInputs();
     imaging.setSettings(experiment.imaging);
@@ -313,6 +379,8 @@ function loadExperiment(experiment, preset, targetMS) {
     }
   } finally { suspended = false; }
   enginePanel.update({simulation, engine:params.engine});
+  editor.setAtomTier(atomTier(params.engine));
+  showIsotope();
   recalculate();
 }
 
@@ -338,7 +406,7 @@ function cancelRun() {
 function recalculate() {
   showReferenceLoss();
   cancelRun();
-  if (!editValid || !form.checkValidity()) {
+  if (!editValid || !form.checkValidity() || (atomTier(params.engine) && !loadingForm.checkValidity())) {
     status('请完成有效的时序与模拟参数。');
     return;
   }
@@ -376,11 +444,11 @@ function recalculate() {
       result = data.result;
       worker.terminate(); worker = null;
       summarize(); showFrame(timeMS); editor.setEnabled(true);
-      const engineName = availableEngines(simulation).find(engine => engine.id === result.engine).label;
-      status('计算完成 · ' + engineName + ' · ' + result.backend + ' · ' + result.n.toLocaleString('zh-CN') + ' 条入射轨迹 · ' +
+      const engineName = availableSequenceEngines(simulation).find(engine => engine.id === result.engine).label;
+      status('计算完成 · ' + engineName + ' · ' + result.backend + ' · ' + (result.incidentN ?? result.n).toLocaleString('zh-CN') + ' 条入射轨迹 · ' +
         ((performance.now() - started) / 1000).toFixed(2) + ' s');
     };
-    worker.postMessage({id, params, config:program.config, shader:computeShader, observeAtMS});
+    worker.postMessage({id,params,config:program.config,shader:computeShader,observeAtMS,loading});
   }, 140);
 }
 
@@ -432,6 +500,7 @@ $('#sequence-file').addEventListener('change', async event => {
     const inputParams = { ...data.params };
     delete inputParams._mot3dCompiled;
     const imported = compile(inputParams).params;
+    if (atomTier(imported.engine)) ybAtom(imported.isotope);
     for (const field of fields) {
       const v = imported[field.name];
       if (!Number.isFinite(v) || (field.min && v < Number(field.min)) || (field.max && v > Number(field.max)) ||
@@ -465,7 +534,7 @@ for (const button of document.querySelectorAll('[data-seq-view]')) button.addEve
 });
 for (const layer of document.querySelectorAll('[data-seq-layer]')) layer.addEventListener('change', updateLayers);
 form.addEventListener('input', recalculate);
-$('#sequence-sample-count').addEventListener('input', recalculate);
+$('#sequence-sample-count').addEventListener('input', () => { autoSampleCount = false; recalculate(); });
 for (const [index, button] of checkpointButtons.entries()) button.addEventListener('click', () => {
   editor.pause();
   editor.setTime(program.checkpointTimesMS[index]);
@@ -484,6 +553,7 @@ loadingForm.addEventListener('input', event => {
       else loading[field.name] = field.valueAsNumber;
     }
   }
+  if (atomTier(params.engine)) { recalculate(); return; }
   summarize();
   $('#sequence-export').disabled = !form.checkValidity() || !editValid || !loadingForm.checkValidity() || !imaging.isValid();
   showFrame(timeMS);

@@ -266,6 +266,7 @@ function setTimeConstant(output, reading, emptyText) {
     return;
   }
   delete output.dataset.value;
-  const messages = {unavailable:'暂无模拟数据', empty:emptyText, 'no-steady-state':'无有限稳态', 'out-of-range':'超出数值范围'};
+  const messages = {unavailable:'暂无模拟数据', empty:emptyText, 'no-steady-state':'无有限稳态', 'out-of-range':'超出数值范围',
+    'sampled-loading':'逐轨迹装载'};
   output.textContent = messages[status];
 }

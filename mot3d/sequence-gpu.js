@@ -2,6 +2,7 @@ import { BEAM_DIRECTIONS, CONSTANTS, HELICITIES } from './physics.js';
 import { DARK_BRANCHES, branchDraws } from './branching.js';
 import { sequenceAt } from './sequence.js';
 import { prepareSequenceRun, writeSequenceGPUFrames, finishSequenceRun } from './sequence-physics.js';
+import { atomTier } from './engines.js';
 
 const atomBytes = 64, frameAtomBytes = 48, planBytes = 64;
 const batchBytes = 24;
@@ -23,11 +24,12 @@ function packApparatus({model,field,program}) {
     ...model.bias, Number(model.params.recoil),
     ...[0,2,4].flatMap(i => [...BEAM_DIRECTIONS[i],HELICITIES[i]]),
     blue.inverseWaistSquared, green.inverseWaistSquared, green.factor*final.greenPowersMW[0], green.factor*final.greenPowersMW[4],
-    blue.factor*load.bluePowersMW[0], blue.factor*load.bluePowersMW[4], green.factor*load.greenPowersMW[0], green.factor*load.greenPowersMW[4],
+    blue.factor*load.bluePowersMW[0], blue.factor*load.bluePowersMW[4], green.factor*receive.greenPowersMW[0], green.factor*receive.greenPowersMW[4],
     normalizedMHzFactor*load.blueDetuningMHz/blue.transition.gamma, normalizedMHzFactor*load.greenDetuningMHz/green.transition.gamma,
     normalizedMHzFactor*receive.greenDetuningMHz/green.transition.gamma, normalizedMHzFactor*final.greenDetuningMHz/green.transition.gamma,
     load.gradientGCM, receive.gradientGCM, final.gradientGCM, ['linear','smooth','geometric'].indexOf(c.powerRamp ?? 'linear'),
     DARK_BRANCHES.blueP0, DARK_BRANCHES.blueP2, DARK_BRANCHES.greenP0, Number(model.params.engine === 'rate-equations'),
+    Number(load.greenOn),0,0,0,
   ]);
 }
 
@@ -73,6 +75,7 @@ function packFrames({field,program,grid}) {
 }
 
 async function integrate(device,pipeline,layout,input,config,options) {
+  if (atomTier(input.engine)) throw new RangeError('镱多能级引擎使用 CPU 积分。');
   const start = performance.now(), run = prepareSequenceRun(input,config,options);
   const {n,frameCount} = run.result;
   const pageSize = Math.min(32, frameCount, Math.floor(Math.min(historyPageBytes,

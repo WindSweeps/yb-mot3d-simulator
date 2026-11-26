@@ -1,7 +1,10 @@
 import { compileSequence, matchingSequencePreset, sequenceAt, sequenceFieldsFor, SEQUENCE_PRESETS } from './sequence.js';
+import { YB_SEQUENCE_CHOICES, YB_SEQUENCE_FIELDS } from './sequence-atom-settings.js';
+import { YB_REPUMPS } from './yb-atom.js';
 
 const phases = [
-  { keys: ['loadMS', 'blueDetuningMHz', 'shieldingMHz', 'loadGradient', 'blueObliqueMW', 'blueHorizontalMW', 'greenObliqueMW', 'greenHorizontalMW'],
+  { keys: ['loadMS', 'blueDetuningMHz', 'shieldingMHz', 'loadGradient', 'blueObliqueMW', 'blueHorizontalMW',
+    'greenDuringLoad','greenObliqueMW','greenHorizontalMW'],
     note: '5 s 取自论文图 4 的双色装载时间。光功率以每个传播方向计，按主梯度轴将论文的弱束分配给水平 H 光，各对中的正反向功率相同。' },
   { keys: ['handoffMS', 'receiveMHz', 'receiveGradient'],
     note: '交接开始时绿光跳到红失谐，随后关断 399 nm 接收光。论文给出蓝光关断不超过 1 ms；蓝光和磁场梯度采用线性变化，表示模拟中的时序假设。' },
@@ -25,6 +28,19 @@ const channels = [
   { label: '556 nm 失谐', tone: 'green', value: s => s.greenDetuningMHz, unit: 'MHz' },
   { label: '主轴梯度', tone: 'field', value: s => s.gradientGCM, unit: 'G/cm' },
   { label: '入射原子束', tone: 'source', value: s => Number(s.stageId === 'load'), gate: true },
+  ...YB_REPUMPS.map(({label},i) => ({label:label+' 重泵浦',tone:'source',
+    value:s => s.repump?.rates[i] ?? 0,unit:'s⁻¹',shown:(program,tier) => tier >= 2 && program.atom.repump?.rates[i]})),
+  {label:'光阱功率',tone:'field',value:s => 1000*(s.trap?.powerW ?? 0),unit:'mW',shown:(p,tier) => tier === 3 && p.atom.trap},
+];
+const atomGroups = [
+  {tier:1,keys:['detuningReference','atomStepUS']},
+  {tier:2,title:'暗态与级联',keys:['atomLossMode','darkDecay','p2Branches','leakP0','leakP1','leakP2']},
+  {tier:2,title:'重泵浦脉冲',keys:['repumpLeadMS','repumpDurationMS','repumpWaistMM',...YB_REPUMPS.map(({key}) => key)],
+    note:'速率为阱中心每个暗态原子每秒经历的重泵浦循环数。零速率关闭对应光路。'},
+  {tier:3,title:'光偶极阱与晶格',keys:['trapMode','trapLeadMS','trapDurationMS','trapWavelengthNM','trapPowerMW',
+    'trapWaistUM','trapPolarizationDeg','alphaGround','alphaBlue','tensorBlue','alphaGreen','tensorGreen',
+    'alphaP0','alphaP2','tensorP2'],
+    note:'光束沿 X 方向传播。输入所选波长下各态的极化率，晶格功率以波腹强度换算。'},
 ];
 const sum = a => a.reduce((x, y) => x + y, 0);
 const number = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 3, useGrouping: false });
@@ -44,7 +60,7 @@ export function mountSequenceEditor(host, { initialPreset = SEQUENCE_PRESETS[0],
   let program = compileSequence(activePreset.config);
   let timeMS = 0, activePhase = 0, scale = 'phase', playback = 0, lastTick = 0;
   let enabled = true, valid = true;
-  let exposureUS = 0;
+  let exposureUS = 0, atomTier = 0;
   host.classList.add('seq-editor');
   host.innerHTML = `
     <div class="seq-title"><div><h2>时序通道</h2><p>各通道共用实验时间，光功率为六束单向光之和。</p></div>
@@ -64,7 +80,9 @@ export function mountSequenceEditor(host, { initialPreset = SEQUENCE_PRESETS[0],
       <label class="seq-time-input"><span class="sr-only">游标时间</span><input type="number" aria-label="游标时间，单位 ms" min="0" step="any" required value="0"><span>ms</span></label></div>
     <div class="seq-phase-controls" role="group" aria-label="切换到阶段起点并编辑参数"></div>
     <div class="seq-form-head"><h3></h3><output class="seq-stage-span"></output></div>
-    <div class="seq-fields"></div><p class="seq-error" role="status" aria-live="polite"></p><p class="seq-note"></p>
+    <div class="seq-fields"></div><p class="seq-note"></p>
+    <details class="seq-atom-controls" hidden><summary>镱引擎时序参数</summary><div class="seq-atom-fields"></div></details>
+    <p class="seq-error" role="status" aria-live="polite"></p>
     <div class="seq-reference"><a href="https://arxiv.org/pdf/2503.24383v2#page=3" target="_blank" rel="noopener">论文实验参数 ↗</a>
     <a href="https://m-labs.hk/artiq/manual/rtio.html#timeline-and-output-events" target="_blank" rel="noopener">ARTIQ 时间游标 ↗</a></div>`;
   const get = selector => host.querySelector(selector);
@@ -75,6 +93,7 @@ export function mountSequenceEditor(host, { initialPreset = SEQUENCE_PRESETS[0],
   const slider = get('.seq-slider'), cursorInput = get('.seq-time-input input');
   const rulerTicks = get('.seq-ticks');
   const play = get('[data-action=play]'), form = get('.seq-fields'), error = get('.seq-error');
+  const atomControls = get('.seq-atom-controls'), atomFields = get('.seq-atom-fields');
   const title = get('.seq-form-head h3'), span = get('.seq-stage-span'), note = get('.seq-note');
   const cameraLane = get('.seq-camera'), cameraWindow = get('.seq-exposure-window');
   const reader = [];
@@ -182,9 +201,15 @@ export function mountSequenceEditor(host, { initialPreset = SEQUENCE_PRESETS[0],
         // 同一个阶段边界分别绘制左、右极限，保持光闸及频率跳变为垂直沿。
         const sampleTime = j === 40 && index < program.stages.length - 1 ?
           stage.endMS - Math.min(1e-8, stage.durationMS * 1e-8) : t;
-        samples.push([timeScale(t) * 1000, sequenceAt(program, sampleTime)]);
+        samples.push([t,sampleTime]);
       }
     }
+    for (const pulse of program.atom.windows) for (const time of [pulse.startMS,pulse.endMS]) {
+      const before = Math.max(0,time-Math.min(.00000001,(pulse.endMS-pulse.startMS)/1000));
+      samples.push([time,before],[time,time]);
+    }
+    samples.sort(([x,a],[y,b]) => (x-y) || (a-b));
+    const traces = samples.map(([time,sampleTime]) => [timeScale(time)*1000,sequenceAt(program,sampleTime)]);
     const markers = [0, ...program.stages.map(s => s.endMS)];
     rulerTicks.replaceChildren();
     const ticks = scale === 'phase' ? markers : [0, program.durationMS / 2, program.durationMS];
@@ -193,10 +218,11 @@ export function mountSequenceEditor(host, { initialPreset = SEQUENCE_PRESETS[0],
       tickLabel.style.left = (100 * timeScale(t)) + '%';
       rulerTicks.append(tickLabel);
     }
-    for (const [i, { path, dividers }] of reader.entries()) {
-      const channel = channels[i], values = samples.map(([, s]) => channel.value(s));
+    for (const [i, { path, dividers, row }] of reader.entries()) {
+      const channel = channels[i], values = traces.map(([, s]) => channel.value(s));
+      row.hidden = Boolean(channel.shown && !channel.shown(program,atomTier));
       const lo = channel.gate ? 0 : Math.min(0, ...values), hi = channel.gate ? 1 : Math.max(0, ...values);
-      path.setAttribute('d', samples.map(([x], k) => {
+      path.setAttribute('d', traces.map(([x], k) => {
         const y = hi > lo ? 26 - 20 * (values[k] - lo) / (hi - lo) : 16;
         return (k === 0 ? 'M' : 'L') + x.toFixed(5) + ' ' + y.toFixed(3);
       }).join(' '));
@@ -204,16 +230,57 @@ export function mountSequenceEditor(host, { initialPreset = SEQUENCE_PRESETS[0],
     }
     cursorInput.max = String(program.durationMS);
   }
+  function makeAtomFields() {
+    atomControls.hidden = !atomTier;
+    atomFields.replaceChildren();
+    for (const group of atomGroups.filter(group => group.tier <= atomTier)) {
+      const area = element('fieldset','seq-atom-group'), controls = element('div','seq-fields');
+      if (group.title) area.append(element('legend','',group.title));
+      for (const key of group.keys) {
+        const label = element('label','seq-field'), definitions = YB_SEQUENCE_CHOICES[key];
+        let input;
+        if (definitions) {
+          label.append(element('span','',definitions[0]));
+          input = element('select');
+          for (const [value,name] of definitions[2]) input.add(new Option(name,value));
+          label.append(input);
+        } else {
+          const [name,unit,min,max,defaultValue] = YB_SEQUENCE_FIELDS[key];
+          label.append(element('span','',name));
+          const wrap = element('span','seq-unit-field');
+          input = element('input');
+          input.type = 'number'; input.step = key === 'p2Branches' ? '1' : 'any'; input.min = min; input.max = max;
+          input.required = defaultValue !== null;
+          if (unit) input.setAttribute('aria-label',name+'，单位 '+unit);
+          wrap.append(input,element('span','seq-unit',unit));
+          label.append(wrap);
+        }
+        input.dataset.key = key;
+        input.value = program.atom.values[key] ?? '';
+        controls.append(label);
+      }
+      area.append(controls);
+      if (group.note) area.append(element('p','seq-note',group.note));
+      atomFields.append(area);
+    }
+  }
   function makeFields() {
     const phase = program.stages[activePhase];
     const definitions = program.config.mode === 'blue-only' ? bluePhases : phases;
     phaseButtons.forEach((b, i) => b.setAttribute('aria-pressed', String(i === activePhase)));
     title.textContent = phase.label + '参数';
-    note.textContent = definitions[activePhase].note;
+    note.textContent = phase.id === 'load' && program.config.greenDuringLoad === false ?
+      '装载期间使用 399 nm 光。交接开始时开启 556 nm，蓝光在设定时间内关断。' : definitions[activePhase].note;
     form.replaceChildren();
     for (const key of definitions[activePhase].keys) {
       const label = element('label', 'seq-field');
-      if (key === 'powerRamp') {
+      if (key === 'greenDuringLoad') {
+        label.append(element('span','','装载时的 556 nm 光路'));
+        const input = element('select');
+        input.dataset.key = key;
+        input.add(new Option('开启','true')); input.add(new Option('关闭','false'));
+        input.value = String(program.config.greenDuringLoad !== false); label.append(input);
+      } else if (key === 'powerRamp') {
         label.append(element('span', '', '绿光功率斜坡'));
         const input = element('select');
         input.dataset.key = key;
@@ -250,6 +317,7 @@ export function mountSequenceEditor(host, { initialPreset = SEQUENCE_PRESETS[0],
     const previous = sequenceAt(program, timeMS);
     const localFraction = previous.elapsedMS / program.stages[previous.stageIndex].durationMS;
     const oldMode = program.config.mode;
+    const oldFrequency = program.atom.values.detuningReference;
     program = compileSequence(config);
     let nextTime = 0;
     if (oldMode !== program.config.mode) {
@@ -260,7 +328,11 @@ export function mountSequenceEditor(host, { initialPreset = SEQUENCE_PRESETS[0],
       nextTime = stage.startMS + localFraction * stage.durationMS;
     }
     pause(); valid = true; error.textContent = '';
-    if (redrawFields) makeFields();
+    if (redrawFields || oldFrequency !== program.atom.values.detuningReference) makeFields();
+    if (activePhase === 0 && program.config.mode !== 'blue-only')
+      note.textContent = program.config.greenDuringLoad === false ?
+        '装载期间使用 399 nm 光。交接开始时开启 556 nm，蓝光在设定时间内关断。' : phases[0].note;
+    if (redrawFields) makeAtomFields();
     refreshLabels(); drawTraces(); applyAvailability();
     onChange?.({ ...program.config }, program);
     setTime(nextTime);
@@ -269,7 +341,16 @@ export function mountSequenceEditor(host, { initialPreset = SEQUENCE_PRESETS[0],
     const config = { ...program.config };
     for (const input of form.querySelectorAll('[data-key]')) {
       const key = input.dataset.key;
-      config[key] = input.tagName === 'SELECT' ? input.value : input.valueAsNumber;
+      if (key === 'greenDuringLoad') {
+        const enabled = input.value === 'true';
+        if (!enabled || Object.hasOwn(config,key)) config[key] = enabled;
+      } else config[key] = input.tagName === 'SELECT' ? input.value : input.valueAsNumber;
+    }
+    for (const input of atomFields.querySelectorAll('[data-key]')) {
+      const key = input.dataset.key;
+      if (!input.checkValidity()) throw new RangeError(input.validationMessage);
+      const value = input.tagName === 'SELECT' ? input.value : input.value === '' ? null : input.valueAsNumber;
+      if (value !== program.atom.values[key] || Object.hasOwn(config,key)) config[key] = value;
     }
     host.querySelectorAll('[data-gate]').forEach(input => { config[input.dataset.gate] = input.checked; });
     return config;
@@ -291,7 +372,7 @@ export function mountSequenceEditor(host, { initialPreset = SEQUENCE_PRESETS[0],
     graphic.append(dividers, path); plot.append(graphic);
     const output = element('output', 'seq-value');
     row.append(element('span', 'seq-label', c.label), plot, output); get('.seq-lanes').append(row);
-    reader[i] = { output, path, dividers };
+    reader[i] = { output, path, dividers, row };
   }
   function seekAtPointer(event) {
     const rect = rulerTicks.getBoundingClientRect();
@@ -331,6 +412,8 @@ export function mountSequenceEditor(host, { initialPreset = SEQUENCE_PRESETS[0],
   });
   listen(form, 'input', () => handleEdit(false));
   listen(form, 'change', () => handleEdit(true));
+  listen(atomFields,'input',() => handleEdit(false));
+  listen(atomFields,'change',() => handleEdit(true));
   host.querySelectorAll('[data-gate]').forEach(input => listen(input, 'change', () => handleEdit(true)));
   function restorePreset() {
     activePhase = 0;
@@ -362,6 +445,20 @@ export function mountSequenceEditor(host, { initialPreset = SEQUENCE_PRESETS[0],
   makeFields(); refreshLabels(); drawTraces(); setTime(0, false);
   return {
     setTime, pause, setImagingGate,
+    setAtomTier(tier) {
+      if (tier === atomTier) return false;
+      atomTier = tier;
+      if (!valid) {
+        valid = true;
+        error.textContent = '';
+        makeFields();
+        applyAvailability();
+      }
+      makeAtomFields();
+      drawTraces();
+      setTime(timeMS,false);
+      return true;
+    },
     setEnabled(value) { enabled = Boolean(value); if (!enabled) pause(); applyAvailability(); },
     replace(config, {presetId, name = '导入时序'} = {}) {
       activePreset = presetId === 'imported' ? null :

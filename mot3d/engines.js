@@ -1,5 +1,19 @@
 export const defaultEngine = 'lightweight';
 
+const sequenceEngines = [
+  {id:'yb-l1', label:'L1 · 镱磁子能级与光抽运'},
+  {id:'yb-l2', label:'L2 · 镱暗态与重泵浦'},
+  {id:'yb-l3', label:'L3 · 镱双波长与光移'},
+];
+
+export function atomTier(id) {
+  return sequenceEngines.findIndex(engine => engine.id === id) + 1;
+}
+
+export function sequenceDefaultEngine(mode) {
+  return mode === 'blue-only' ? 'yb-l2' : defaultEngine;
+}
+
 const engines = {
   blue: [
     {id: defaultEngine, label: '轻量散射模型（399 nm）'},
@@ -19,4 +33,8 @@ export function availableEngines(simulation) {
 export function validateEngine(id) {
   if (!engines.blue.some(engine => engine.id === id)) throw new RangeError('未知的 MOT 模拟引擎。');
   return id;
+}
+
+export function availableSequenceEngines(simulation) {
+  return [...availableEngines(simulation), ...sequenceEngines];
 }

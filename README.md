@@ -9,6 +9,7 @@
 HTML 中的 WebGPU 计算着色器逐原子并行积分。页面显示本批计算的后端和耗时，浏览器无法提供 WebGPU 适配器时使用 CPU Worker。可在[数值测试页](mot3d/tests/webgpu.html)核对两个后端，并测量本机对 192、768 个原子的计算时间。
 
 - [模型、参数来源与参考文献](mot3d/METHOD.md)
+- [镱多能级时序引擎与物理验证](mot3d/YB-ATOM.md)
 - [40 m/s 冷束捕获重算报告](mot3d/reports/2026-10-30-source-polarization/REPORT.md)
 - [复算原始统计](mot3d/reports/2026-10-30-source-polarization/results.json)
 - 捕获演示显示六束 MOT 光和线圈中的原子运动。飞行轨迹短暂可见，逐渐消失，最后留下被捕获的发光云团。可以暂停、拖动时间轴或重播。下方的发射率、辐射功率与 XZ 投影按连续入射计算，默认通量为 10⁹ 个 ¹⁷⁴Yb 原子/s。[播放捕获演示](https://windsweeps.github.io/yb-mot3d-simulator/mot3d/#demo) · [查看捕获云团](https://windsweeps.github.io/yb-mot3d-simulator/mot3d/#fluorescence)
